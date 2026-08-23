@@ -3,64 +3,86 @@
 {% block title %}个人中心 - {{ app_name }}{% endblock %}
 
 {% block content %}
-<div style="max-width: 800px; margin: 0 auto;">
-    <h2 class="card-title" style="margin-bottom: 1.5rem;">个人中心</h2>
+<div class="fade-in" style="max-width: 800px; margin: 0 auto;">
+    <h2 class="text-2xl font-bold mb-6">个人中心</h2>
 
     <!-- 基本信息 -->
-    <div class="card" style="margin-bottom: 1.5rem;">
-        <div class="card-header">
-            <span class="card-title">基本信息</span>
-            <span class="badge badge-primary">主身份</span>
-        </div>
-        <div style="display: grid; gap: 1rem;">
-            <div class="flex items-center gap-4" style="margin-bottom: 0.5rem;">
-                <div id="avatarPreview" style="width: 64px; height: 64px; border-radius: 50%; background: #e2e8f0; display: flex; align-items: center; justify-content: center; overflow: hidden; flex-shrink: 0;">
-                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2">
-                        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+    <div class="card mb-6" style="padding: 2rem;">
+        <div class="card-header" style="border: none; padding-bottom: 1.25rem;">
+            <div class="flex items-center gap-3">
+                <div style="width: 40px; height: 40px; background: linear-gradient(135deg, #e0e7ff 0%, #c7d2fe 100%); border-radius: var(--radius); display: flex; align-items: center; justify-content: center;">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" stroke-width="2">
+                        <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/>
                         <circle cx="12" cy="7" r="4"/>
                     </svg>
                 </div>
-                <div>
-                    <div class="text-sm font-medium">{{ user.email }}</div>
-                    <div class="text-xs text-secondary">{{ user.full_name or user.username or '未设置昵称' }}</div>
-                    <label class="btn btn-secondary btn-sm" style="margin-top: 0.5rem; cursor: pointer;">
-                        <input type="file" id="avatarInput" accept="image/*" style="display: none;" onchange="uploadAvatar(this)">
-                        更换头像
-                    </label>
-                </div>
+                <span class="card-title">基本信息</span>
             </div>
-            <div class="flex items-center justify-between">
-                <span class="text-secondary text-sm">中大邮箱</span>
-                <span class="text-sm font-medium">{{ user.email }}</span>
+            <span class="badge badge-admin">主身份</span>
+        </div>
+
+        <div class="flex items-center gap-4 mb-6" style="padding: 1rem; background: #f8fafc; border-radius: var(--radius); border: 1px solid var(--border);">
+            <div id="avatarPreview" style="width: 72px; height: 72px; border-radius: 50%; background: linear-gradient(135deg, #e0e7ff 0%, #c7d2fe 100%); display: flex; align-items: center; justify-content: center; overflow: hidden; flex-shrink: 0; box-shadow: 0 4px 12px rgba(79, 70, 229, 0.1);">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" stroke-width="1.5">
+                    <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/>
+                    <circle cx="12" cy="7" r="4"/>
+                </svg>
             </div>
-            <div class="flex items-center justify-between">
-                <span class="text-secondary text-sm">邮箱验证</span>
+            <div>
+                <div class="font-bold text-lg">{{ user.email }}</div>
+                <div class="text-sm text-secondary">{{ user.full_name or user.username or '未设置昵称' }}</div>
+                <label class="btn btn-secondary btn-sm mt-2" style="cursor: pointer;">
+                    <input type="file" id="avatarInput" accept="image/*" style="display: none;" onchange="uploadAvatar(this)">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display: inline; vertical-align: middle; margin-right: 0.25rem;">
+                        <path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/>
+                        <circle cx="12" cy="13" r="4"/>
+                    </svg>
+                    更换头像
+                </label>
+            </div>
+        </div>
+
+        <div class="grid grid-2" style="gap: 1rem;">
+            <div class="flex items-center justify-between" style="padding: 1rem; background: #f8fafc; border-radius: var(--radius); border: 1px solid var(--border);">
+                <span class="text-sm text-secondary">中大邮箱</span>
+                <span class="text-sm font-semibold">{{ user.email }}</span>
+            </div>
+            <div class="flex items-center justify-between" style="padding: 1rem; background: #f8fafc; border-radius: var(--radius); border: 1px solid var(--border);">
+                <span class="text-sm text-secondary">邮箱验证</span>
                 {% if user.email_verified %}
                     <span class="badge badge-success">已验证</span>
                 {% else %}
                     <span class="badge badge-secondary">未验证</span>
                 {% endif %}
             </div>
-            <div class="flex items-center justify-between">
-                <span class="text-secondary text-sm">昵称</span>
-                <span class="text-sm font-medium">{{ user.username or '未设置' }}</span>
+            <div class="flex items-center justify-between" style="padding: 1rem; background: #f8fafc; border-radius: var(--radius); border: 1px solid var(--border);">
+                <span class="text-sm text-secondary">昵称</span>
+                <span class="text-sm font-semibold">{{ user.username or '未设置' }}</span>
             </div>
-            <div class="flex items-center justify-between">
-                <span class="text-secondary text-sm">姓名</span>
-                <span class="text-sm font-medium">{{ user.full_name or '未设置' }}</span>
+            <div class="flex items-center justify-between" style="padding: 1rem; background: #f8fafc; border-radius: var(--radius); border: 1px solid var(--border);">
+                <span class="text-sm text-secondary">姓名</span>
+                <span class="text-sm font-semibold">{{ user.full_name or '未设置' }}</span>
             </div>
         </div>
     </div>
 
     <!-- 外部身份绑定 -->
-    <div class="card" style="margin-bottom: 1.5rem;">
-        <div class="card-header">
+    <div class="card mb-6" style="padding: 2rem;">
+        <div class="card-header" style="border: none; padding-bottom: 1.25rem;">
             <div>
-                <span class="card-title">账号绑定</span>
-                <p class="text-secondary text-sm mt-2">绑定集市账号或其他外部身份，方便快速登录和授权</p>
+                <div class="flex items-center gap-3 mb-1">
+                    <div style="width: 40px; height: 40px; background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%); border-radius: var(--radius); display: flex; align-items: center; justify-content: center;">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#d97706" stroke-width="2">
+                            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                            <path d="M7 11V7a5 5 0 0110 0v4"/>
+                        </svg>
+                    </div>
+                    <span class="card-title">账号绑定</span>
+                </div>
+                <p class="text-sm text-secondary">绑定集市账号或其他外部身份，方便快速登录和授权</p>
             </div>
             <button class="btn btn-primary btn-sm" onclick="openModal('bindIdentityModal')">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display: inline; vertical-align: middle; margin-right: 0.25rem;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <line x1="12" y1="5" x2="12" y2="19"/>
                     <line x1="5" y1="12" x2="19" y2="12"/>
                 </svg>
@@ -69,58 +91,80 @@
         </div>
 
         {% if identities %}
-        <table class="table">
-            <thead>
-                <tr>
-                    <th>平台</th>
-                    <th>外部账号</th>
-                    <th>绑定时间</th>
-                    <th>操作</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for identity in identities %}
-                <tr>
-                    <td>
-                        <span class="badge badge-secondary">{{ identity.provider }}</span>
-                    </td>
-                    <td>
-                        <div style="font-weight: 500;">{{ identity.provider_username or identity.provider_user_id }}</div>
-                        {% if identity.provider_email %}
-                            <div class="text-xs text-secondary">{{ identity.provider_email }}</div>
-                        {% endif %}
-                    </td>
-                    <td class="text-sm text-secondary">
-                        {{ identity.created_at.strftime('%Y-%m-%d %H:%M') }}
-                    </td>
-                    <td>
-                        <button class="btn btn-danger btn-sm" onclick="unbindIdentity('{{ identity.id }}', '{{ identity.provider }}')">解绑</button>
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
+        <div style="overflow-x: auto;">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>平台</th>
+                        <th>外部账号</th>
+                        <th>绑定时间</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for identity in identities %}
+                    <tr>
+                        <td>
+                            <span class="badge badge-secondary">{{ identity.provider }}</span>
+                        </td>
+                        <td>
+                            <div style="font-weight: 600;">{{ identity.provider_username or identity.provider_user_id }}</div>
+                            {% if identity.provider_email %}
+                                <div class="text-xs text-secondary">{{ identity.provider_email }}</div>
+                            {% endif %}
+                        </td>
+                        <td class="text-sm text-secondary">
+                            {{ identity.created_at.strftime('%Y-%m-%d %H:%M') }}
+                        </td>
+                        <td>
+                            <button class="btn btn-danger btn-sm" onclick="unbindIdentity('{{ identity.id }}', '{{ identity.provider }}')">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display: inline; vertical-align: middle;">
+                                    <line x1="18" y1="6" x2="6" y2="18"/>
+                                    <line x1="6" y1="6" x2="18" y2="18"/>
+                                </svg>
+                                解绑
+                            </button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
         {% else %}
         <div class="empty-state">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                <path d="M16 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/>
-                <circle cx="8.5" cy="7" r="4"/>
-                <line x1="20" y1="8" x2="20" y2="14"/>
-                <line x1="23" y1="11" x2="17" y2="11"/>
-            </svg>
-            <h3 style="font-size: 1rem; font-weight: 500; margin-bottom: 0.5rem;">暂无绑定账号</h3>
-            <p class="text-sm">点击右上角「绑定账号」添加集市账号或其他外部身份。</p>
+            <div class="empty-state-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <path d="M16 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/>
+                    <circle cx="8.5" cy="7" r="4"/>
+                    <line x1="20" y1="8" x2="20" y2="14"/>
+                    <line x1="23" y1="11" x2="17" y2="11"/>
+                </svg>
+            </div>
+            <h3>暂无绑定账号</h3>
+            <p>点击右上角「绑定账号」添加集市账号或其他外部身份。</p>
         </div>
         {% endif %}
     </div>
 
     <!-- 我的授权 -->
-    <div class="card">
-        <div class="card-header">
-            <span class="card-title">我的授权</span>
-            <a href="{{ root_path }}consents" class="btn btn-secondary btn-sm">管理授权</a>
+    <div class="card" style="padding: 2rem;">
+        <div class="card-header" style="border: none; padding-bottom: 1.25rem;">
+            <div class="flex items-center gap-3">
+                <div style="width: 40px; height: 40px; background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%); border-radius: var(--radius); display: flex; align-items: center; justify-content: center;">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#059669" stroke-width="2">
+                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                    </svg>
+                </div>
+                <span class="card-title">我的授权</span>
+            </div>
+            <a href="{{ root_path }}consents" class="btn btn-secondary btn-sm">
+                管理授权
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="9 18 15 12 9 6"/>
+                </svg>
+            </a>
         </div>
-        <p class="text-secondary text-sm">查看和管理您授权给第三方应用的权限。</p>
+        <p class="text-sm text-secondary">查看和管理您授权给第三方应用的权限，随时可撤销。</p>
     </div>
 </div>
 
@@ -129,7 +173,12 @@
     <div class="modal">
         <div class="modal-header">
             <h3 class="modal-title">绑定外部账号</h3>
-            <button class="modal-close" onclick="closeModal('bindIdentityModal')">&times;</button>
+            <button class="modal-close" onclick="closeModal('bindIdentityModal')">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="18" y1="6" x2="6" y2="18"/>
+                    <line x1="6" y1="6" x2="18" y2="18"/>
+                </svg>
+            </button>
         </div>
         <form id="bindIdentityForm" onsubmit="return bindIdentity(event)">
             <div class="form-group">
@@ -154,7 +203,7 @@
                 <label class="form-label">外部邮箱</label>
                 <input type="email" name="provider_email" class="form-input" placeholder="xxx@example.com">
             </div>
-            <div class="flex gap-2 justify-end">
+            <div class="flex gap-3 justify-end">
                 <button type="button" class="btn btn-secondary" onclick="closeModal('bindIdentityModal')">取消</button>
                 <button type="submit" class="btn btn-primary">绑定</button>
             </div>

@@ -472,37 +472,57 @@ async def require_permission(resource: str, action: str):
 # ==================== 初始化数据（加固版） ====================
 
 async def init_default_data(db: AsyncSession):
-    result = await db.execute(select(User).limit(1))
-    if result.scalar_one_or_none():
+    """初始化默认权限、角色和管理员（支持增量，避免重复）"""
+    from sqlalchemy import select
+
+    # 1. 初始化权限（存在则跳过）
+    perm_defs = [
+        ("user:read", "user", "read", "查看用户信息"),
+        ("user:write", "user", "write", "修改用户信息"),
+        ("app:read", "app", "read", "查看应用"),
+        ("app:write", "app", "write", "管理应用"),
+        ("app:delete", "app", "delete", "删除应用"),
+        ("admin:all", "*", "*", "所有管理员权限"),
+    ]
+    perms_map = {}
+    for name, resource, action, desc in perm_defs:
+        result = await db.execute(select(Permission).where(Permission.name == name))
+        perm = result.scalar_one_or_none()
+        if not perm:
+            perm = Permission(
+                id=str(uuid.uuid4()), name=name, resource=resource,
+                action=action, description=desc,
+            )
+            db.add(perm)
+            await db.flush()
+            await db.refresh(perm)
+        perms_map[name] = perm
+
+    # 2. 初始化角色（存在则跳过）
+    role_defs = [
+        ("admin", "系统管理员", list(perms_map.values())),
+        ("user", "普通用户", [perms_map["user:read"], perms_map["app:read"]]),
+    ]
+    roles_map = {}
+    for name, desc, permissions in role_defs:
+        result = await db.execute(select(Role).where(Role.name == name))
+        role = result.scalar_one_or_none()
+        if not role:
+            role = Role(
+                id=str(uuid.uuid4()), name=name, description=desc,
+                is_system=True, permissions=permissions,
+            )
+            db.add(role)
+            await db.flush()
+            await db.refresh(role)
+        roles_map[name] = role
+
+    # 3. 检查是否已有用户（有任何用户则跳过管理员自动创建）
+    user_result = await db.execute(select(User).limit(1))
+    if user_result.scalar_one_or_none():
         return
 
-    # 默认权限
-    default_perms = [
-        Permission(id=str(uuid.uuid4()), name="user:read", resource="user", action="read", description="查看用户信息"),
-        Permission(id=str(uuid.uuid4()), name="user:write", resource="user", action="write", description="修改用户信息"),
-        Permission(id=str(uuid.uuid4()), name="app:read", resource="app", action="read", description="查看应用"),
-        Permission(id=str(uuid.uuid4()), name="app:write", resource="app", action="write", description="管理应用"),
-        Permission(id=str(uuid.uuid4()), name="app:delete", resource="app", action="delete", description="删除应用"),
-        Permission(id=str(uuid.uuid4()), name="admin:all", resource="*", action="*", description="所有管理员权限"),
-    ]
-    for perm in default_perms:
-        db.add(perm)
-
-    # 默认角色
-    admin_role = Role(
-        id=str(uuid.uuid4()), name="admin", description="系统管理员", is_system=True,
-    )
-    user_role = Role(
-        id=str(uuid.uuid4()), name="user", description="普通用户", is_system=True,
-    )
-    db.add(admin_role)
-    db.add(user_role)
-    await db.flush()
-
-    admin_role.permissions.extend(default_perms)
-    user_role.permissions.extend([default_perms[0], default_perms[2]])
-
-    # 创建管理员用户（必须通过环境变量设置，无默认值）
+    # 4. 创建管理员用户（必须通过环境变量设置）
     admin_email = _settings.admin_email
     admin_password = _settings.admin_password
 
@@ -520,7 +540,6 @@ async def init_default_data(db: AsyncSession):
         await db.commit()
         return
 
-    # 验证邮箱格式
     if not is_sysu_email(admin_email):
         import sys
         print(
@@ -540,8 +559,8 @@ async def init_default_data(db: AsyncSession):
         email_verified=True,
         is_active=True,
         is_admin=True,
+        roles=[roles_map["admin"]],
     )
-    admin.roles.append(admin_role)
     db.add(admin)
     await db.commit()
 

@@ -127,7 +127,9 @@ def _validate_image_file(content_type: Optional[str], content: bytes) -> bool:
 
 @router.get("/", response_class=HTMLResponse)
 async def index(request: Request, user: Optional[User] = Depends(get_current_user_from_session)):
-    """首页"""
+    """首页 — 未登录自动跳转登录页"""
+    if user is None:
+        return RedirectResponse(url="/login", status_code=302)
     from app.main import templates
     return templates.TemplateResponse(request, "index.html", {
         "request": request,

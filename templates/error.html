@@ -3,16 +3,30 @@
 {% block title %}错误 - {{ app_name }}{% endblock %}
 
 {% block content %}
-<div style="max-width: 500px; margin: 4rem auto; text-align: center;">
-    <div style="width: 80px; height: 80px; background: #fef2f2; border-radius: 1rem; display: flex; align-items: center; justify-content: center; margin: 0 auto 1.5rem;">
-        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#dc2626" stroke-width="2">
+<div class="fade-in text-center" style="max-width: 480px; margin: 5rem auto;">
+    <div style="width: 96px; height: 96px; background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%); border-radius: var(--radius-xl); display: inline-flex; align-items: center; justify-content: center; margin-bottom: 1.5rem; box-shadow: 0 8px 24px rgba(239, 68, 68, 0.15);">
+        <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#dc2626" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="12" cy="12" r="10"/>
             <line x1="12" y1="8" x2="12" y2="12"/>
             <line x1="12" y1="16" x2="12.01" y2="16"/>
         </svg>
     </div>
-    <h1 style="font-size: 2rem; font-weight: 700; margin-bottom: 0.5rem;">{{ status_code or 500 }}</h1>
-    <p style="color: var(--text-secondary); margin-bottom: 1.5rem;">{{ detail or '出错了，请稍后重试' }}</p>
-    <a href="{{ root_path }}" class="btn btn-primary">返回首页</a>
+    <h1 class="text-3xl font-bold mb-2" style="font-size: 3.5rem; color: var(--text); letter-spacing: -0.05em;">{{ status_code or 500 }}</h1>
+    <p class="text-lg text-secondary mb-6">{{ detail or '出错了，请稍后重试' }}</p>
+    <div class="flex gap-3 justify-center">
+        <a href="{{ root_path }}" class="btn btn-primary">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/>
+                <polyline points="9 22 9 12 15 12 15 22"/>
+            </svg>
+            返回首页
+        </a>
+        <button onclick="history.back()" class="btn btn-secondary">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="15 18 9 12 15 6"/>
+            </svg>
+            返回上一页
+        </button>
+    </div>
 </div>
 {% endblock %}
