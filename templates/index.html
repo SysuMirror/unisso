@@ -47,17 +47,17 @@
                 </div>
             </div>
             <div class="mt-4 flex gap-2">
-                <a href="/profile" class="btn btn-primary">个人中心</a>
-                <a href="/consents" class="btn btn-secondary">管理授权</a>
+                <a href="{{ root_path }}profile" class="btn btn-primary">个人中心</a>
+                <a href="{{ root_path }}consents" class="btn btn-secondary">管理授权</a>
                 {% if user.is_admin %}
-                    <a href="/admin/apps" class="btn btn-secondary">管理应用</a>
+                    <a href="{{ root_path }}admin/apps" class="btn btn-secondary">管理应用</a>
                 {% endif %}
             </div>
         </div>
     {% else %}
         <div class="flex gap-4 justify-center">
-            <a href="/login" class="btn btn-primary btn-lg">立即登录</a>
-            <a href="/register" class="btn btn-secondary btn-lg">注册账号</a>
+            <a href="{{ root_path }}login" class="btn btn-primary btn-lg">立即登录</a>
+            <a href="{{ root_path }}register" class="btn btn-secondary btn-lg">注册账号</a>
         </div>
 
         <div class="grid grid-3" style="margin-top: 4rem; max-width: 900px; margin-left: auto; margin-right: auto;">

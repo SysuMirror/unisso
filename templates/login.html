@@ -20,7 +20,7 @@
         </div>
         {% endif %}
 
-        <form action="/api/auth/login" method="post">
+        <form action="{{ root_path }}api/auth/login" method="post">
             <input type="hidden" name="next" value="{{ next }}">
 
             <div class="form-group">
@@ -45,7 +45,7 @@
         <div style="text-align: center; margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--border);">
             <p class="text-sm text-secondary">
                 还没有账号？
-                <a href="/register" style="color: var(--primary); text-decoration: none; font-weight: 500;">立即注册</a>
+                <a href="{{ root_path }}register" style="color: var(--primary); text-decoration: none; font-weight: 500;">立即注册</a>
             </p>
         </div>
     </div>

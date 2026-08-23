@@ -49,7 +49,7 @@
                         {{ consent.granted_at.strftime('%Y-%m-%d %H:%M') }}
                     </td>
                     <td>
-                        <form action="/api/consents/{{ consent.id }}" method="post"
+                        <form action="{{ root_path }}api/consents/{{ consent.id }}" method="post"
                               onsubmit="return confirm('确定要撤销对 {{ consent.application.name }} 的授权吗？');"
                               style="display: inline;">
                             <input type="hidden" name="_method" value="delete">

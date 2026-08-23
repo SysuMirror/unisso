@@ -94,6 +94,9 @@ class Settings(BaseSettings):
     admin_password: str = os.environ.get("UNISSO_ADMIN_PASSWORD", "")
     admin_email: str = os.environ.get("UNISSO_ADMIN_EMAIL", "")
 
+    # 部署路径前缀（用于子路径部署，如 /unisso）
+    root_path: str = os.environ.get("ROOT_PATH", "")
+
     # CORS
     cors_origins: List[str] = ["*"]
 

@@ -32,6 +32,15 @@ from app.audit import log_login, log_register, log_security_alert
 _settings = get_settings()
 security_bearer = HTTPBearer(auto_error=False)
 
+
+def _auth_url(path: str) -> str:
+    """生成带 root_path 前缀的 URL"""
+    rp = _settings.root_path.rstrip("/")
+    if rp:
+        return f"{rp}{path}"
+    return path
+
+
 # Sysu 邮箱正则
 SYSU_EMAIL_RE = re.compile(r"^[a-zA-Z0-9._%+-]+@mail\d*\.sysu\.edu\.cn$")
 
@@ -336,7 +345,7 @@ async def require_user(
     if not user:
         raise HTTPException(
             status_code=status.HTTP_307_TEMPORARY_REDIRECT,
-            headers={"Location": "/login?next=" + str(request.url.path)},
+            headers={"Location": _auth_url("/login") + "?next=" + str(request.url.path)},
         )
     return user
 
@@ -423,7 +432,7 @@ async def require_auth_user(
             )
         raise HTTPException(
             status_code=status.HTTP_307_TEMPORARY_REDIRECT,
-            headers={"Location": "/login?next=" + str(request.url.path)},
+            headers={"Location": _auth_url("/login") + "?next=" + str(request.url.path)},
         )
     return user
 

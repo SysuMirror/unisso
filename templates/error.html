@@ -13,6 +13,6 @@
     </div>
     <h1 style="font-size: 2rem; font-weight: 700; margin-bottom: 0.5rem;">{{ status_code or 500 }}</h1>
     <p style="color: var(--text-secondary); margin-bottom: 1.5rem;">{{ detail or '出错了，请稍后重试' }}</p>
-    <a href="/" class="btn btn-primary">返回首页</a>
+    <a href="{{ root_path }}" class="btn btn-primary">返回首页</a>
 </div>
 {% endblock %}

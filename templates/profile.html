@@ -118,7 +118,7 @@
     <div class="card">
         <div class="card-header">
             <span class="card-title">我的授权</span>
-            <a href="/consents" class="btn btn-secondary btn-sm">管理授权</a>
+            <a href="{{ root_path }}consents" class="btn btn-secondary btn-sm">管理授权</a>
         </div>
         <p class="text-secondary text-sm">查看和管理您授权给第三方应用的权限。</p>
     </div>
@@ -182,7 +182,7 @@ async function bindIdentity(e) {
     };
 
     try {
-        const res = await fetch('/api/identities', {
+        const res = await fetch('{{ root_path }}/api/identities', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data),
@@ -225,7 +225,7 @@ async function uploadAvatar(input) {
     const form = new FormData();
     form.append('file', file);
     try {
-        const res = await fetch('/api/me/avatar', { method: 'POST', body: form });
+        const res = await fetch('{{ root_path }}/api/me/avatar', { method: 'POST', body: form });
         const result = await res.json();
         if (res.ok && result.url) {
             const preview = document.getElementById('avatarPreview');
@@ -241,7 +241,7 @@ async function uploadAvatar(input) {
 // 页面加载时尝试获取头像
 (async function() {
     try {
-        const res = await fetch('/api/me/avatar');
+        const res = await fetch('{{ root_path }}/api/me/avatar');
         const result = await res.json();
         if (result.ok && result.url) {
             const preview = document.getElementById('avatarPreview');

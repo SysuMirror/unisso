@@ -101,6 +101,7 @@ app = FastAPI(
     version=_settings.app_version,
     description="UniSSO - 中山大学统一身份认证平台",
     lifespan=lifespan,
+    root_path=_settings.root_path,
 )
 
 # 安全中间件（顺序重要：越先添加的越外层）
@@ -118,11 +119,13 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type", "X-CSRF-Token"],
 )
 
-# 静态文件
-app.mount("/static", StaticFiles(directory="static"), name="static")
+# 静态文件（支持子路径部署）
+_static_path = f"{_settings.root_path}/static" if _settings.root_path else "/static"
+app.mount(_static_path, StaticFiles(directory="static"), name="static")
 
 # 模板
 templates = Jinja2Templates(directory="templates")
+templates.env.globals["root_path"] = _settings.root_path
 
 # 路由
 app.include_router(router)
@@ -139,7 +142,9 @@ async def http_exception_handler(request: Request, exc: HTTPException):
             content={"error": exc.detail},
         )
     if exc.status_code == 401:
-        return RedirectResponse(f"/login?next={request.url.path}", status_code=302)
+        rp = _settings.root_path.rstrip("/")
+        login_path = f"{rp}/login" if rp else "/login"
+        return RedirectResponse(f"{login_path}?next={request.url.path}", status_code=302)
     if exc.status_code == 403:
         return templates.TemplateResponse(request, "error.html", {
             "status_code": exc.status_code,

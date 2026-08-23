@@ -22,7 +22,7 @@
         </div>
         {% endif %}
 
-        <form action="/api/auth/register" method="post">
+        <form action="{{ root_path }}api/auth/register" method="post">
             <div class="form-group">
                 <label class="form-label">中大邮箱 <span class="text-secondary text-xs">* 必填</span></label>
                 <input type="email" name="email" class="form-input" required
@@ -59,7 +59,7 @@
         <div style="text-align: center; margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--border);">
             <p class="text-sm text-secondary">
                 已有账号？
-                <a href="/login" style="color: var(--primary); text-decoration: none; font-weight: 500;">立即登录</a>
+                <a href="{{ root_path }}login" style="color: var(--primary); text-decoration: none; font-weight: 500;">立即登录</a>
             </p>
         </div>
     </div>

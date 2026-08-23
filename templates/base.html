@@ -277,7 +277,7 @@
 <body>
     <nav class="navbar">
         <div class="navbar-inner">
-            <a href="/" class="logo">
+            <a href="{{ root_path }}" class="logo">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
                 </svg>
@@ -285,21 +285,21 @@
             </a>
             <div class="nav-links">
                 {% if user %}
-                    <a href="/consents">我的授权</a>
-                    <a href="/profile">个人中心</a>
+                    <a href="{{ root_path }}consents">我的授权</a>
+                    <a href="{{ root_path }}profile">个人中心</a>
                     {% if user.is_admin %}
-                        <a href="/admin/apps">应用管理</a>
-                        <a href="/admin/users">用户管理</a>
+                        <a href="{{ root_path }}admin/apps">应用管理</a>
+                        <a href="{{ root_path }}admin/users">用户管理</a>
                     {% endif %}
                     <div class="nav-user">
                         <span class="username">{{ user.email.split('@')[0] }}</span>
-                        <form action="/api/auth/logout" method="post" style="display:inline">
+                        <form action="{{ root_path }}api/auth/logout" method="post" style="display:inline">
                             <button type="submit" class="btn btn-secondary btn-sm">退出</button>
                         </form>
                     </div>
                 {% else %}
-                    <a href="/login">登录</a>
-                    <a href="/register" class="btn btn-primary btn-sm">注册</a>
+                    <a href="{{ root_path }}login">登录</a>
+                    <a href="{{ root_path }}register" class="btn btn-primary btn-sm">注册</a>
                 {% endif %}
             </div>
         </div>
