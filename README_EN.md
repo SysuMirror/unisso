@@ -105,7 +105,9 @@ Optional configuration:
 | Variable | Description |
 |----------|-------------|
 | `UNISSO_SECRET_KEY` | JWT signing key (**required in production, >=32 chars**) |
-| `UNISSO_ADMIN_PASSWORD` | Initial admin password (**must change in production**) |
+| `UNISSO_ADMIN_EMAIL` | Initial admin email (**must be sysu email format**) |
+| `UNISSO_ADMIN_PASSWORD` | Initial admin password (**admin only created if both email and password are set**) |
+| `UNISSO_ADMIN_USERNAME` | Initial admin username (optional, default `admin`) |
 | `TRUST_PROXY` | `true` to trust reverse proxy HTTPS headers |
 | `FORCE_HTTPS` | `true` to auto-redirect HTTP to HTTPS (308) |
 | `HTTPS_CERT/HTTPS_KEY` | Self-signed certificate paths (for app-level HTTPS) |
@@ -144,7 +146,7 @@ UNISSO_SECRET_KEY=your-strong-random-key
 
 - Automatic database migration (`alembic upgrade head`)
 - Automatic creation of default roles and permissions
-- Automatic creation of admin account (email set via `UNISSO_ADMIN_EMAIL`, default `admin@mail.sysu.edu.cn`)
+- Automatic creation of admin account if `UNISSO_ADMIN_EMAIL` and `UNISSO_ADMIN_PASSWORD` are both set
 
 ## OAuth2 Integration Guide
 

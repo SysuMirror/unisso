@@ -105,7 +105,9 @@ UNISSO_ADMIN_PASSWORD=管理员强密码
 | 变量 | 说明 |
 |------|------|
 | `UNISSO_SECRET_KEY` | JWT 签名密钥（**生产环境必须设置，>=32位**） |
-| `UNISSO_ADMIN_PASSWORD` | 初始管理员密码（**生产环境必须修改**） |
+| `UNISSO_ADMIN_EMAIL` | 初始管理员邮箱（**必须是 sysu 邮箱格式**） |
+| `UNISSO_ADMIN_PASSWORD` | 初始管理员密码（**必须设置才会创建管理员**） |
+| `UNISSO_ADMIN_USERNAME` | 初始管理员用户名（可选，默认 `admin`） |
 | `TRUST_PROXY` | `true` 时信任反向代理的 HTTPS 头 |
 | `FORCE_HTTPS` | `true` 时 HTTP 请求自动 308 重定向到 HTTPS |
 | `HTTPS_CERT/HTTPS_KEY` | 自签名证书路径（应用直接监听 HTTPS 时使用） |
@@ -140,7 +142,7 @@ UNISSO_SECRET_KEY=你的强随机密钥
 
 - 自动执行数据库迁移（`alembic upgrade head`）
 - 自动创建默认角色、权限
-- 自动创建管理员账号（邮箱通过 `UNISSO_ADMIN_EMAIL` 设置，默认 `admin@mail.sysu.edu.cn`）
+- 如果设置了 `UNISSO_ADMIN_EMAIL` + `UNISSO_ADMIN_PASSWORD`，自动创建管理员账号
 
 ## OAuth2 接入指南
 

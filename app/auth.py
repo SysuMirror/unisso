@@ -493,16 +493,40 @@ async def init_default_data(db: AsyncSession):
     admin_role.permissions.extend(default_perms)
     user_role.permissions.extend([default_perms[0], default_perms[2]])
 
-    # 创建管理员用户（使用 sysu 邮箱格式）
-    # 生产环境检查：如果使用默认密码，记录告警
+    # 创建管理员用户（必须通过环境变量设置，无默认值）
+    admin_email = _settings.admin_email
     admin_password = _settings.admin_password
-    is_default_password = admin_password in ("admin123", "password", "12345678")
+
+    if not admin_email or not admin_password:
+        import sys
+        print(
+            "\n" + "=" * 60 + "\n"
+            "【提示】未设置管理员账号环境变量，跳过创建默认管理员。\n"
+            "  如需自动创建管理员，请设置：\n"
+            "    UNISSO_ADMIN_EMAIL=你的中大邮箱\n"
+            "    UNISSO_ADMIN_PASSWORD=你的强密码\n"
+            "=" * 60 + "\n",
+            file=sys.stderr,
+        )
+        await db.commit()
+        return
+
+    # 验证邮箱格式
+    if not is_sysu_email(admin_email):
+        import sys
+        print(
+            f"【警告】管理员邮箱格式不正确: {admin_email}\n"
+            "  管理员邮箱必须是 *.mail*.sysu.edu.cn 格式\n",
+            file=sys.stderr,
+        )
+        await db.commit()
+        return
 
     admin = User(
         id=str(uuid.uuid4()),
-        email=_settings.admin_email,
+        email=admin_email,
         password_hash=hash_password(admin_password),
-        username="admin",
+        username=_settings.admin_username or "admin",
         full_name="系统管理员",
         email_verified=True,
         is_active=True,
@@ -512,15 +536,4 @@ async def init_default_data(db: AsyncSession):
     db.add(admin)
     await db.commit()
 
-    if is_default_password:
-        import sys
-        print(
-            "\n" + "=" * 60 + "\n"
-            "【安全警告】管理员账号使用了默认密码！\n"
-            f"  邮箱: {_settings.admin_email}\n"
-            f"  密码: {admin_password}\n"
-            "  请立即通过环境变量修改：\n"
-            "    UNISSO_ADMIN_PASSWORD=你的强密码\n"
-            "=" * 60 + "\n",
-            file=sys.stderr,
-        )
+    print(f"【UniSSO】管理员账号已创建: {admin_email}")

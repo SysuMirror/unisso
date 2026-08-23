@@ -89,10 +89,10 @@ class Settings(BaseSettings):
     gpu_ids: Optional[str] = os.environ.get("GPU_IDS")
     gpu_models: Optional[str] = os.environ.get("GPU_MODELS")
 
-    # 初始化管理员（首次启动时创建，生产环境必须修改密码）
-    admin_username: str = "admin"
+    # 初始化管理员（首次启动时创建，必须通过环境变量设置）
+    admin_username: str = os.environ.get("UNISSO_ADMIN_USERNAME", "admin")
     admin_password: str = os.environ.get("UNISSO_ADMIN_PASSWORD", "")
-    admin_email: str = os.environ.get("UNISSO_ADMIN_EMAIL", "admin@mail.sysu.edu.cn")
+    admin_email: str = os.environ.get("UNISSO_ADMIN_EMAIL", "")
 
     # CORS
     cors_origins: List[str] = ["*"]
