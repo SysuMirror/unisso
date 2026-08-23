@@ -2,17 +2,20 @@ FROM python:3.10-slim
 
 WORKDIR /app
 
-# 安装系统依赖
+# 使用国内镜像源加速 apt
+RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
+    sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list 2>/dev/null || true
+
+# 安装系统依赖（最小化）
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
-    libpq-dev \
     default-libmysqlclient-dev \
     pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
-# 复制依赖文件
+# 使用国内 PyPI 镜像源
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -i https://mirrors.aliyun.com/pypi/simple/ -r requirements.txt
 
 # 复制应用代码
 COPY . .
