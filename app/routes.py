@@ -142,7 +142,7 @@ async def login_page(request: Request, next: Optional[str] = None, error: Option
     from app.main import templates
     return templates.TemplateResponse(request, "login.html", {
         "request": request,
-        "next": next or _url("/"),
+        "next": next or _url('/'),
         "error": error,
         "app_name": _settings.app_name,
     })
@@ -326,7 +326,7 @@ async def api_login(
     if not allowed:
         log_login(None, client_ip, user_agent, success=False, email=email, reason=f"登录被锁定，剩余 {remaining} 秒")
         return RedirectResponse(
-            f"{_url("/login")}?error=too_many_attempts&next={next}",
+            f"{_url('/login')}?error=too_many_attempts&next={next}",
             status_code=status.HTTP_302_FOUND,
         )
 
@@ -335,7 +335,7 @@ async def api_login(
         await record_login_failure(client_ip)
         log_login(None, client_ip, user_agent, success=False, email=email, reason="凭证错误")
         return RedirectResponse(
-            f"{_url("/login")}?error=invalid_credentials&next={next}",
+            f"{_url('/login')}?error=invalid_credentials&next={next}",
             status_code=status.HTTP_302_FOUND,
         )
 
@@ -363,7 +363,7 @@ async def api_logout(request: Request):
     if session_id:
         await delete_session(session_id)
 
-    response = RedirectResponse(_url("/", status_code=status.HTTP_302_FOUND)
+    response = RedirectResponse(_url("/"), status_code=status.HTTP_302_FOUND)
     response.delete_cookie("unisso_session", path="/")
     return response
 
@@ -385,7 +385,7 @@ async def api_register(
     if not is_sysu_email(email):
         log_register(None, client_ip, user_agent, success=False, email=email, reason="邮箱格式错误")
         return RedirectResponse(
-            f"{_url("/register")}?error=invalid_email",
+            f"{_url('/register')}?error=invalid_email",
             status_code=status.HTTP_302_FOUND,
         )
 
@@ -394,7 +394,7 @@ async def api_register(
     if existing:
         log_register(None, client_ip, user_agent, success=False, email=email, reason="邮箱已存在")
         return RedirectResponse(
-            f"{_url("/register")}?error=email_exists",
+            f"{_url('/register')}?error=email_exists",
             status_code=status.HTTP_302_FOUND,
         )
 
@@ -410,7 +410,7 @@ async def api_register(
     except ValueError as e:
         log_register(None, client_ip, user_agent, success=False, email=email, reason=str(e))
         return RedirectResponse(
-            f"{_url("/register")}?error={str(e)}",
+            f"{_url('/register')}?error={str(e)}",
             status_code=status.HTTP_302_FOUND,
         )
 
@@ -418,7 +418,7 @@ async def api_register(
     session_id = await create_session(user.id, user.username or user.email)
     log_register(user.id, client_ip, user_agent, success=True, email=email)
 
-    response = RedirectResponse(_url("/", status_code=status.HTTP_302_FOUND)
+    response = RedirectResponse(_url("/"), status_code=status.HTTP_302_FOUND)
     cookie_opts = get_cookie_settings(request)
     response.set_cookie(key="unisso_session", value=session_id, **cookie_opts)
     return response
