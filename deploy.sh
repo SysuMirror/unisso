@@ -6,7 +6,7 @@
 #   - 环境感知（根据负载动态调整 worker 数）
 #   - 幂等初始化（venv、数据库迁移）
 #   - 自动 HTTPS 配置（可选）
-set -euo pipefail
+set -eu
 
 cd "$(dirname "$0")"
 
