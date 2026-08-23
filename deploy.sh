@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/sh
 # UniSSO - 统一单点登录系统部署入口
 # 符合 ssesinfra 平台部署契约：
 #   - 绑定 0.0.0.0:$PORT
