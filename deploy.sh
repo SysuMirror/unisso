@@ -14,10 +14,9 @@ PORT="${PORT:-8080}"
 VENV=".venv"
 
 # 1) 一次性建虚拟环境并装依赖
-if [ ! -x "$VENV/bin/python" ]; then
+if [ ! -x "$VENV/bin/pip" ]; then
   echo "【UniSSO】首次初始化 venv"
-  python3 -m venv "$VENV"
-  "$VENV/bin/pip" install --quiet --upgrade pip
+  python3 -m venv --upgrade-deps "$VENV"
   "$VENV/bin/pip" install --quiet -r requirements.txt
 fi
 

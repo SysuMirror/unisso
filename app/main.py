@@ -119,9 +119,10 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type", "X-CSRF-Token"],
 )
 
-# 静态文件（支持子路径部署）
-_static_path = f"{_settings.root_path}/static" if _settings.root_path else "/static"
-app.mount(_static_path, StaticFiles(directory="static"), name="static")
+# 静态文件（支持子路径部署，目录不存在时跳过）
+if os.path.isdir("static"):
+    _static_path = f"{_settings.root_path}/static" if _settings.root_path else "/static"
+    app.mount(_static_path, StaticFiles(directory="static"), name="static")
 
 # 模板
 templates = Jinja2Templates(directory="templates")
