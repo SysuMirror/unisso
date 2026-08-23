@@ -1,0 +1,240 @@
+{% extends "base.html" %}
+
+{% block title %}应用管理 - {{ app_name }}{% endblock %}
+
+{% block content %}
+<div style="max-width: 1000px; margin: 0 auto;">
+    <div class="flex items-center justify-between" style="margin-bottom: 1.5rem;">
+        <div>
+            <h2 class="card-title">应用管理</h2>
+            <p class="text-secondary text-sm">管理所有接入 UniSSO 的 OAuth2 客户端应用</p>
+        </div>
+        <button class="btn btn-primary" onclick="openModal('createAppModal')">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display: inline; vertical-align: middle; margin-right: 0.25rem;">
+                <line x1="12" y1="5" x2="12" y2="19"/>
+                <line x1="5" y1="12" x2="19" y2="12"/>
+            </svg>
+            注册应用
+        </button>
+    </div>
+
+    <div class="card">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>应用名称</th>
+                    <th>Client ID</th>
+                    <th>类型</th>
+                    <th>状态</th>
+                    <th>Scopes</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for app in applications %}
+                <tr>
+                    <td>
+                        <div style="font-weight: 500;">{{ app.name }}</div>
+                        {% if app.description %}
+                            <div class="text-xs text-secondary">{{ app.description[:50] }}{% if app.description|length > 50 %}...{% endif %}</div>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <code class="text-xs" style="background: #f1f5f9; padding: 0.125rem 0.375rem; border-radius: 0.25rem;">{{ app.client_id }}</code>
+                    </td>
+                    <td>
+                        {% if app.is_confidential %}
+                            <span class="badge badge-primary">Confidential</span>
+                        {% else %}
+                            <span class="badge badge-secondary">Public</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if app.is_active %}
+                            <span class="badge badge-success">启用</span>
+                        {% else %}
+                            <span class="badge badge-secondary">禁用</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% for scope in app.allowed_scopes %}
+                            <span class="scope-tag">{{ scope }}</span>
+                        {% endfor %}
+                    </td>
+                    <td>
+                        <div class="flex gap-2">
+                            <button class="btn btn-secondary btn-sm" onclick="showAppDetail('{{ app.id }}')">详情</button>
+                            <button class="btn btn-danger btn-sm" onclick="deleteApp('{{ app.id }}', '{{ app.name }}')">删除</button>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- 创建应用 Modal -->
+<div class="modal-overlay" id="createAppModal">
+    <div class="modal">
+        <div class="modal-header">
+            <h3 class="modal-title">注册新应用</h3>
+            <button class="modal-close" onclick="closeModal('createAppModal')">&times;</button>
+        </div>
+        <form id="createAppForm" onsubmit="return createApp(event)">
+            <div class="form-group">
+                <label class="form-label">应用名称 *</label>
+                <input type="text" name="name" class="form-input" required>
+            </div>
+            <div class="form-group">
+                <label class="form-label">描述</label>
+                <input type="text" name="description" class="form-input">
+            </div>
+            <div class="form-group">
+                <label class="form-label">回调地址（每行一个）*</label>
+                <textarea name="redirect_uris" class="form-input" rows="3" required placeholder="http://localhost:3000/callback"></textarea>
+            </div>
+            <div class="form-group">
+                <label class="form-label">允许的 Scopes（每行一个）</label>
+                <textarea name="allowed_scopes" class="form-input" rows="3" placeholder="openid&#10;profile&#10;email"></textarea>
+            </div>
+            <div class="form-group">
+                <label class="form-label">主页 URL</label>
+                <input type="url" name="homepage_url" class="form-input" placeholder="https://your-app.com">
+            </div>
+            <div class="form-group">
+                <label class="form-label">
+                    <input type="checkbox" name="is_confidential" checked>
+                    Confidential 客户端（有 secret）
+                </label>
+            </div>
+            <div class="flex gap-2 justify-end">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('createAppModal')">取消</button>
+                <button type="submit" class="btn btn-primary">创建</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- 应用详情 Modal -->
+<div class="modal-overlay" id="appDetailModal">
+    <div class="modal">
+        <div class="modal-header">
+            <h3 class="modal-title">应用详情</h3>
+            <button class="modal-close" onclick="closeModal('appDetailModal')">&times;</button>
+        </div>
+        <div id="appDetailContent"></div>
+    </div>
+</div>
+
+{% block extra_js %}
+<script>
+function openModal(id) {
+    document.getElementById(id).classList.add('active');
+}
+function closeModal(id) {
+    document.getElementById(id).classList.remove('active');
+}
+
+async function createApp(e) {
+    e.preventDefault();
+    const form = e.target;
+    const data = {
+        name: form.name.value,
+        description: form.description.value,
+        redirect_uris: form.redirect_uris.value.split('\n').filter(s => s.trim()),
+        allowed_scopes: form.allowed_scopes.value.split('\n').filter(s => s.trim()),
+        homepage_url: form.homepage_url.value || null,
+        is_confidential: form.is_confidential.checked,
+    };
+
+    try {
+        const res = await fetch('/api/apps', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data),
+        });
+        const result = await res.json();
+        if (res.ok) {
+            alert(`应用创建成功！\n\nClient ID: ${result.client_id}\nClient Secret: ${result.client_secret || '(Public 客户端无 secret)'}\n\n请妥善保存 Client Secret，它只会显示一次。`);
+            closeModal('createAppModal');
+            location.reload();
+        } else {
+            alert('创建失败: ' + (result.error || '未知错误'));
+        }
+    } catch (err) {
+        alert('请求失败: ' + err.message);
+    }
+    return false;
+}
+
+async function showAppDetail(appId) {
+    try {
+        const res = await fetch(`/api/apps/${appId}`);
+        const app = await res.json();
+        if (!res.ok) {
+            alert('获取详情失败');
+            return;
+        }
+
+        document.getElementById('appDetailContent').innerHTML = `
+            <div class="form-group">
+                <label class="form-label">应用名称</label>
+                <input type="text" class="form-input" value="${app.name}" readonly>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Client ID</label>
+                <input type="text" class="form-input" value="${app.client_id}" readonly>
+            </div>
+            <div class="form-group">
+                <label class="form-label">回调地址</label>
+                <textarea class="form-input" rows="2" readonly>${app.redirect_uris.join('\n')}</textarea>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Scopes</label>
+                <div>${app.allowed_scopes.map(s => `<span class="scope-tag">${s}</span>`).join('')}</div>
+            </div>
+            <div class="flex gap-2 justify-end">
+                <button class="btn btn-secondary" onclick="resetSecret('${app.id}')">重置 Secret</button>
+                <button class="btn btn-secondary" onclick="closeModal('appDetailModal')">关闭</button>
+            </div>
+        `;
+        openModal('appDetailModal');
+    } catch (err) {
+        alert('请求失败: ' + err.message);
+    }
+}
+
+async function resetSecret(appId) {
+    if (!confirm('确定要重置 Client Secret 吗？旧 secret 将立即失效。')) return;
+    try {
+        const res = await fetch(`/api/apps/${appId}/reset-secret`, { method: 'POST' });
+        const result = await res.json();
+        if (res.ok) {
+            alert(`Secret 已重置！\n\n新的 Client Secret: ${result.client_secret}\n\n请立即保存。`);
+            closeModal('appDetailModal');
+        } else {
+            alert('重置失败: ' + (result.error || '未知错误'));
+        }
+    } catch (err) {
+        alert('请求失败: ' + err.message);
+    }
+}
+
+async function deleteApp(appId, appName) {
+    if (!confirm(`确定要删除应用 "${appName}" 吗？此操作不可撤销。`)) return;
+    try {
+        const res = await fetch(`/api/apps/${appId}`, { method: 'DELETE' });
+        if (res.ok) {
+            location.reload();
+        } else {
+            const result = await res.json();
+            alert('删除失败: ' + (result.error || '未知错误'));
+        }
+    } catch (err) {
+        alert('请求失败: ' + err.message);
+    }
+}
+</script>
+{% endblock %}
+{% endblock %}

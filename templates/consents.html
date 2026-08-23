@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+
+{% block title %}我的授权 - {{ app_name }}{% endblock %}
+
+{% block content %}
+<div style="max-width: 800px; margin: 0 auto;">
+    <div class="card-header" style="margin-bottom: 1.5rem;">
+        <h2 class="card-title">我的授权</h2>
+        <span class="text-secondary text-sm">管理您授权给第三方应用的权限</span>
+    </div>
+
+    {% if consents %}
+    <div class="card">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>应用</th>
+                    <th>授权范围</th>
+                    <th>授权时间</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for consent in consents %}
+                <tr>
+                    <td>
+                        <div class="flex items-center gap-2">
+                            {% if consent.application.icon %}
+                                <img src="{{ consent.application.icon }}" alt="" style="width: 32px; height: 32px; border-radius: 0.25rem;">
+                            {% else %}
+                                <div style="width: 32px; height: 32px; background: #dbeafe; border-radius: 0.25rem; display: flex; align-items: center; justify-content: center;">
+                                    <span style="font-size: 0.75rem; font-weight: 600; color: var(--primary);">
+                                        {{ consent.application.name[:1] }}
+                                    </span>
+                                </div>
+                            {% endif %}
+                            <div>
+                                <div style="font-weight: 500;">{{ consent.application.name }}</div>
+                                <div class="text-xs text-secondary">{{ consent.application.client_id }}</div>
+                            </div>
+                        </div>
+                    </td>
+                    <td>
+                        {% for scope in consent.scopes %}
+                            <span class="scope-tag">{{ scope }}</span>
+                        {% endfor %}
+                    </td>
+                    <td class="text-sm text-secondary">
+                        {{ consent.granted_at.strftime('%Y-%m-%d %H:%M') }}
+                    </td>
+                    <td>
+                        <form action="/api/consents/{{ consent.id }}" method="post"
+                              onsubmit="return confirm('确定要撤销对 {{ consent.application.name }} 的授权吗？');"
+                              style="display: inline;">
+                            <input type="hidden" name="_method" value="delete">
+                            <button type="submit" class="btn btn-danger btn-sm">撤销</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="empty-state card">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+            <path d="M7 11V7a5 5 0 0110 0v4"/>
+        </svg>
+        <h3 style="font-size: 1rem; font-weight: 500; margin-bottom: 0.5rem;">暂无授权记录</h3>
+        <p class="text-sm">您还没有授权任何应用访问您的账号信息。</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

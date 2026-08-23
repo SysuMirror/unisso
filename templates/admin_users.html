@@ -1,0 +1,199 @@
+{% extends "base.html" %}
+
+{% block title %}用户管理 - {{ app_name }}{% endblock %}
+
+{% block content %}
+<div style="max-width: 1000px; margin: 0 auto;">
+    <div class="flex items-center justify-between" style="margin-bottom: 1.5rem;">
+        <div>
+            <h2 class="card-title">用户管理</h2>
+            <p class="text-secondary text-sm">管理集市账号用户</p>
+        </div>
+        <button class="btn btn-primary" onclick="openModal('createUserModal')">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display: inline; vertical-align: middle; margin-right: 0.25rem;">
+                <line x1="12" y1="5" x2="12" y2="19"/>
+                <line x1="5" y1="12" x2="19" y2="12"/>
+            </svg>
+            添加用户
+        </button>
+    </div>
+
+    <div class="card">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>用户</th>
+                    <th>邮箱</th>
+                    <th>角色</th>
+                    <th>状态</th>
+                    <th>最后登录</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for u in users %}
+                <tr>
+                    <td>
+                        <div style="font-weight: 500;">{{ u.username }}</div>
+                        {% if u.full_name %}
+                            <div class="text-xs text-secondary">{{ u.full_name }}</div>
+                        {% endif %}
+                    </td>
+                    <td class="text-sm">{{ u.email or '-' }}</td>
+                    <td>
+                        {% if u.is_admin %}
+                            <span class="badge badge-primary">管理员</span>
+                        {% else %}
+                            <span class="badge badge-secondary">普通用户</span>
+                        {% endif %}
+                        {% for role in u.roles %}
+                            <span class="badge badge-secondary">{{ role.name }}</span>
+                        {% endfor %}
+                    </td>
+                    <td>
+                        {% if u.is_active %}
+                            <span class="badge badge-success">正常</span>
+                        {% else %}
+                            <span class="badge badge-secondary">已禁用</span>
+                        {% endif %}
+                    </td>
+                    <td class="text-sm text-secondary">
+                        {% if u.last_login_at %}
+                            {{ u.last_login_at.strftime('%Y-%m-%d %H:%M') }}
+                        {% else %}
+                            从未登录
+                        {% endif %}
+                    </td>
+                    <td>
+                        <div class="flex gap-2">
+                            {% if u.id != user.id %}
+                                <button class="btn btn-secondary btn-sm" onclick="toggleUserStatus('{{ u.id }}', {{ 'false' if u.is_active else 'true' }})">
+                                    {{ '禁用' if u.is_active else '启用' }}
+                                </button>
+                                <button class="btn btn-danger btn-sm" onclick="deleteUser('{{ u.id }}', '{{ u.username }}')">删除</button>
+                            {% else %}
+                                <span class="text-xs text-secondary">当前用户</span>
+                            {% endif %}
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- 创建用户 Modal -->
+<div class="modal-overlay" id="createUserModal">
+    <div class="modal">
+        <div class="modal-header">
+            <h3 class="modal-title">添加用户</h3>
+            <button class="modal-close" onclick="closeModal('createUserModal')">&times;</button>
+        </div>
+        <form id="createUserForm" onsubmit="return createUser(event)">
+            <div class="form-group">
+                <label class="form-label">用户名 *</label>
+                <input type="text" name="username" class="form-input" required minlength="3">
+            </div>
+            <div class="form-group">
+                <label class="form-label">密码 *</label>
+                <input type="password" name="password" class="form-input" required minlength="6">
+            </div>
+            <div class="form-group">
+                <label class="form-label">邮箱</label>
+                <input type="email" name="email" class="form-input">
+            </div>
+            <div class="form-group">
+                <label class="form-label">昵称</label>
+                <input type="text" name="full_name" class="form-input">
+            </div>
+            <div class="form-group">
+                <label class="form-label">
+                    <input type="checkbox" name="is_admin">
+                    设为管理员
+                </label>
+            </div>
+            <div class="flex gap-2 justify-end">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('createUserModal')">取消</button>
+                <button type="submit" class="btn btn-primary">创建</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+{% block extra_js %}
+<script>
+function openModal(id) {
+    document.getElementById(id).classList.add('active');
+}
+function closeModal(id) {
+    document.getElementById(id).classList.remove('active');
+}
+
+async function createUser(e) {
+    e.preventDefault();
+    const form = e.target;
+    const data = {
+        username: form.username.value,
+        password: form.password.value,
+        email: form.email.value || null,
+        full_name: form.full_name.value || null,
+    };
+    const isAdmin = form.is_admin.checked;
+
+    try {
+        const res = await fetch(`/api/admin/users?is_admin=${isAdmin}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data),
+        });
+        if (res.ok) {
+            closeModal('createUserModal');
+            location.reload();
+        } else {
+            const result = await res.json();
+            alert('创建失败: ' + (result.error || '未知错误'));
+        }
+    } catch (err) {
+        alert('请求失败: ' + err.message);
+    }
+    return false;
+}
+
+async function toggleUserStatus(userId, isActive) {
+    const action = isActive ? '启用' : '禁用';
+    if (!confirm(`确定要${action}该用户吗？`)) return;
+    try {
+        const res = await fetch(`/api/admin/users/${userId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ is_active: isActive }),
+        });
+        if (res.ok) {
+            location.reload();
+        } else {
+            const result = await res.json();
+            alert('操作失败: ' + (result.error || '未知错误'));
+        }
+    } catch (err) {
+        alert('请求失败: ' + err.message);
+    }
+}
+
+async function deleteUser(userId, username) {
+    if (!confirm(`确定要删除用户 "${username}" 吗？此操作不可撤销。`)) return;
+    try {
+        const res = await fetch(`/api/admin/users/${userId}`, { method: 'DELETE' });
+        if (res.ok) {
+            location.reload();
+        } else {
+            const result = await res.json();
+            alert('删除失败: ' + (result.error || '未知错误'));
+        }
+    } catch (err) {
+        alert('请求失败: ' + err.message);
+    }
+}
+</script>
+{% endblock %}
+{% endblock %}

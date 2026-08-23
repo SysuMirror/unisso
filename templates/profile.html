@@ -1,0 +1,254 @@
+{% extends "base.html" %}
+
+{% block title %}个人中心 - {{ app_name }}{% endblock %}
+
+{% block content %}
+<div style="max-width: 800px; margin: 0 auto;">
+    <h2 class="card-title" style="margin-bottom: 1.5rem;">个人中心</h2>
+
+    <!-- 基本信息 -->
+    <div class="card" style="margin-bottom: 1.5rem;">
+        <div class="card-header">
+            <span class="card-title">基本信息</span>
+            <span class="badge badge-primary">主身份</span>
+        </div>
+        <div style="display: grid; gap: 1rem;">
+            <div class="flex items-center gap-4" style="margin-bottom: 0.5rem;">
+                <div id="avatarPreview" style="width: 64px; height: 64px; border-radius: 50%; background: #e2e8f0; display: flex; align-items: center; justify-content: center; overflow: hidden; flex-shrink: 0;">
+                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2">
+                        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                        <circle cx="12" cy="7" r="4"/>
+                    </svg>
+                </div>
+                <div>
+                    <div class="text-sm font-medium">{{ user.email }}</div>
+                    <div class="text-xs text-secondary">{{ user.full_name or user.username or '未设置昵称' }}</div>
+                    <label class="btn btn-secondary btn-sm" style="margin-top: 0.5rem; cursor: pointer;">
+                        <input type="file" id="avatarInput" accept="image/*" style="display: none;" onchange="uploadAvatar(this)">
+                        更换头像
+                    </label>
+                </div>
+            </div>
+            <div class="flex items-center justify-between">
+                <span class="text-secondary text-sm">中大邮箱</span>
+                <span class="text-sm font-medium">{{ user.email }}</span>
+            </div>
+            <div class="flex items-center justify-between">
+                <span class="text-secondary text-sm">邮箱验证</span>
+                {% if user.email_verified %}
+                    <span class="badge badge-success">已验证</span>
+                {% else %}
+                    <span class="badge badge-secondary">未验证</span>
+                {% endif %}
+            </div>
+            <div class="flex items-center justify-between">
+                <span class="text-secondary text-sm">昵称</span>
+                <span class="text-sm font-medium">{{ user.username or '未设置' }}</span>
+            </div>
+            <div class="flex items-center justify-between">
+                <span class="text-secondary text-sm">姓名</span>
+                <span class="text-sm font-medium">{{ user.full_name or '未设置' }}</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- 外部身份绑定 -->
+    <div class="card" style="margin-bottom: 1.5rem;">
+        <div class="card-header">
+            <div>
+                <span class="card-title">账号绑定</span>
+                <p class="text-secondary text-sm mt-2">绑定集市账号或其他外部身份，方便快速登录和授权</p>
+            </div>
+            <button class="btn btn-primary btn-sm" onclick="openModal('bindIdentityModal')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display: inline; vertical-align: middle; margin-right: 0.25rem;">
+                    <line x1="12" y1="5" x2="12" y2="19"/>
+                    <line x1="5" y1="12" x2="19" y2="12"/>
+                </svg>
+                绑定账号
+            </button>
+        </div>
+
+        {% if identities %}
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>平台</th>
+                    <th>外部账号</th>
+                    <th>绑定时间</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for identity in identities %}
+                <tr>
+                    <td>
+                        <span class="badge badge-secondary">{{ identity.provider }}</span>
+                    </td>
+                    <td>
+                        <div style="font-weight: 500;">{{ identity.provider_username or identity.provider_user_id }}</div>
+                        {% if identity.provider_email %}
+                            <div class="text-xs text-secondary">{{ identity.provider_email }}</div>
+                        {% endif %}
+                    </td>
+                    <td class="text-sm text-secondary">
+                        {{ identity.created_at.strftime('%Y-%m-%d %H:%M') }}
+                    </td>
+                    <td>
+                        <button class="btn btn-danger btn-sm" onclick="unbindIdentity('{{ identity.id }}', '{{ identity.provider }}')">解绑</button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="empty-state">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M16 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/>
+                <circle cx="8.5" cy="7" r="4"/>
+                <line x1="20" y1="8" x2="20" y2="14"/>
+                <line x1="23" y1="11" x2="17" y2="11"/>
+            </svg>
+            <h3 style="font-size: 1rem; font-weight: 500; margin-bottom: 0.5rem;">暂无绑定账号</h3>
+            <p class="text-sm">点击右上角「绑定账号」添加集市账号或其他外部身份。</p>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- 我的授权 -->
+    <div class="card">
+        <div class="card-header">
+            <span class="card-title">我的授权</span>
+            <a href="/consents" class="btn btn-secondary btn-sm">管理授权</a>
+        </div>
+        <p class="text-secondary text-sm">查看和管理您授权给第三方应用的权限。</p>
+    </div>
+</div>
+
+<!-- 绑定账号 Modal -->
+<div class="modal-overlay" id="bindIdentityModal">
+    <div class="modal">
+        <div class="modal-header">
+            <h3 class="modal-title">绑定外部账号</h3>
+            <button class="modal-close" onclick="closeModal('bindIdentityModal')">&times;</button>
+        </div>
+        <form id="bindIdentityForm" onsubmit="return bindIdentity(event)">
+            <div class="form-group">
+                <label class="form-label">平台 *</label>
+                <select name="provider" class="form-input" required>
+                    <option value="">选择平台</option>
+                    <option value="ssemarket">集市账号 (ssemarket)</option>
+                    <option value="github">GitHub</option>
+                    <option value="wechat">微信</option>
+                    <option value="custom">其他</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">外部用户ID *</label>
+                <input type="text" name="provider_user_id" class="form-input" required placeholder="外部系统的用户标识">
+            </div>
+            <div class="form-group">
+                <label class="form-label">外部用户名</label>
+                <input type="text" name="provider_username" class="form-input" placeholder="显示名称">
+            </div>
+            <div class="form-group">
+                <label class="form-label">外部邮箱</label>
+                <input type="email" name="provider_email" class="form-input" placeholder="xxx@example.com">
+            </div>
+            <div class="flex gap-2 justify-end">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('bindIdentityModal')">取消</button>
+                <button type="submit" class="btn btn-primary">绑定</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+{% block extra_js %}
+<script>
+function openModal(id) {
+    document.getElementById(id).classList.add('active');
+}
+function closeModal(id) {
+    document.getElementById(id).classList.remove('active');
+}
+
+async function bindIdentity(e) {
+    e.preventDefault();
+    const form = e.target;
+    const data = {
+        provider: form.provider.value,
+        provider_user_id: form.provider_user_id.value,
+        provider_username: form.provider_username.value || null,
+        provider_email: form.provider_email.value || null,
+    };
+
+    try {
+        const res = await fetch('/api/identities', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data),
+        });
+        if (res.ok) {
+            closeModal('bindIdentityModal');
+            location.reload();
+        } else {
+            const result = await res.json();
+            alert('绑定失败: ' + (result.detail || result.error || '未知错误'));
+        }
+    } catch (err) {
+        alert('请求失败: ' + err.message);
+    }
+    return false;
+}
+
+async function unbindIdentity(identityId, provider) {
+    if (!confirm(`确定要解绑 ${provider} 账号吗？`)) return;
+    try {
+        const res = await fetch(`/api/identities/${identityId}`, { method: 'DELETE' });
+        if (res.ok) {
+            location.reload();
+        } else {
+            const result = await res.json();
+            alert('解绑失败: ' + (result.detail || result.error || '未知错误'));
+        }
+    } catch (err) {
+        alert('请求失败: ' + err.message);
+    }
+}
+
+async function uploadAvatar(input) {
+    const file = input.files[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+        alert('头像不能超过 5MB');
+        return;
+    }
+    const form = new FormData();
+    form.append('file', file);
+    try {
+        const res = await fetch('/api/me/avatar', { method: 'POST', body: form });
+        const result = await res.json();
+        if (res.ok && result.url) {
+            const preview = document.getElementById('avatarPreview');
+            preview.innerHTML = `<img src="${result.url}" style="width:100%;height:100%;object-fit:cover;">`;
+        } else {
+            alert('上传失败: ' + (result.detail || result.reason || '未知错误'));
+        }
+    } catch (err) {
+        alert('上传失败: ' + err.message);
+    }
+}
+
+// 页面加载时尝试获取头像
+(async function() {
+    try {
+        const res = await fetch('/api/me/avatar');
+        const result = await res.json();
+        if (result.ok && result.url) {
+            const preview = document.getElementById('avatarPreview');
+            preview.innerHTML = `<img src="${result.url}" style="width:100%;height:100%;object-fit:cover;">`;
+        }
+    } catch (e) {}
+})();
+</script>
+{% endblock %}
+{% endblock %}
