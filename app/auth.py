@@ -16,6 +16,7 @@ from typing import Optional, List
 from fastapi import Request, Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -62,7 +63,11 @@ async def get_user_by_username(db: AsyncSession, username: str) -> Optional[User
 
 
 async def get_user_by_id(db: AsyncSession, user_id: str) -> Optional[User]:
-    result = await db.execute(select(User).where(User.id == user_id))
+    result = await db.execute(
+        select(User)
+        .options(selectinload(User.roles), selectinload(User.identities))
+        .where(User.id == user_id)
+    )
     return result.scalar_one_or_none()
 
 
