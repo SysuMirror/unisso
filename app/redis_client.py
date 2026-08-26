@@ -24,6 +24,9 @@ class RedisClient:
             "host": _settings.redis_host,
             "port": _settings.redis_port,
             "decode_responses": True,
+            # 本地/防火墙 DROP 场景避免连接无限挂起
+            "socket_connect_timeout": 2,
+            "socket_timeout": 2,
         }
         if _settings.redis_password:
             kwargs["password"] = _settings.redis_password

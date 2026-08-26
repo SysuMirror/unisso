@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     port: int = int(os.environ.get("PORT", "8080"))
 
     # 数据库（平台注入 MySQL 凭证，label=组名）
+    # 线上：平台注入 MYSQL_* → MySQL；本地：python dev_local.py（默认 SQLite，--mysql 读 .env.local）
+    # 当前远程部署：175.178.90.215:3506（sse_market_db 容器）unisso 库，后续计划迁移（待定）
     database_url: str = ""
     mysql_host: str = os.environ.get("MYSQL_HOST", "localhost")
     mysql_port: int = int(os.environ.get("MYSQL_PORT", "3306"))
@@ -62,7 +64,7 @@ class Settings(BaseSettings):
 
     # JWT
     jwt_algorithm: str = "HS256"
-    jwt_access_token_expire_minutes: int = 30
+    jwt_access_token_expire_minutes: int = 60
     jwt_refresh_token_expire_days: int = 7
     jwt_id_token_expire_minutes: int = 60
 

@@ -96,6 +96,8 @@ async def update_user(db: AsyncSession, user: User, data: UserUpdate) -> User:
         user.username = data.username
     if data.full_name is not None:
         user.full_name = data.full_name
+    if data.student_id is not None:
+        user.student_id = data.student_id
     if data.avatar is not None:
         user.avatar = data.avatar
     if data.is_active is not None:
@@ -379,6 +381,14 @@ async def get_current_user_from_token(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="无效的访问令牌",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    # 撤销检查（token 未落库或已撤销均视为无效；延迟导入避免循环依赖）
+    from app.oauth2_server import is_token_revoked
+    if await is_token_revoked(db, payload.get("jti", ""), "access"):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="令牌已撤销",
             headers={"WWW-Authenticate": "Bearer"},
         )
     user_id = payload.get("sub")

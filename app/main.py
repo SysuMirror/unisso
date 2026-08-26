@@ -137,12 +137,22 @@ app.include_router(router)
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
     """统一处理 HTTP 异常"""
+    # 3xx 重定向异常：透传 Location 头（require_user 等抛出的 307 依赖此路径）
+    if 300 <= exc.status_code < 400 and (exc.headers or {}).get("Location"):
+        return RedirectResponse(exc.headers["Location"], status_code=exc.status_code)
     if request.headers.get("accept", "").startswith("application/json"):
         return JSONResponse(
             status_code=exc.status_code,
             content={"error": exc.detail},
         )
     if exc.status_code == 401:
+        # API 端点（OAuth 资源/管理接口）必须返回 JSON 401，不重定向浏览器页面
+        if request.url.path.startswith("/api"):
+            return JSONResponse(
+                status_code=exc.status_code,
+                content={"error": exc.detail},
+                headers={"WWW-Authenticate": "Bearer"},
+            )
         rp = _settings.root_path.rstrip("/")
         login_path = f"{rp}/login" if rp else "/login"
         return RedirectResponse(f"{login_path}?next={request.url.path}", status_code=302)
@@ -232,21 +242,23 @@ async def db_probe():
 
 @app.get("/redis")
 async def redis_probe():
-    """Redis 连通性探针"""
-    if not _settings.redis_user:
-        return {"ok": False, "reason": "未注入 REDIS 凭证（在数据库页建 label=组名 的凭证）"}
-    try:
-        import redis as sync_redis
-        r = sync_redis.Redis(
-            host=_settings.redis_host,
-            port=int(_settings.redis_port),
-            username=_settings.redis_user,
-            password=_settings.redis_password,
-            decode_responses=True,
-        )
-        return {"ok": True, "ping": r.ping(), "prefix": _settings.redis_prefix}
-    except Exception as e:
-        return {"ok": False, "reason": str(e)}
+    """Redis 连通性探针（上报实际连接状态：Redis 或内存回退）"""
+    if redis_client._client is not None:
+        try:
+            await redis_client._client.ping()
+            return {
+                "ok": True,
+                "mode": "redis",
+                "ping": True,
+                "prefix": _settings.redis_prefix,
+            }
+        except Exception as e:
+            return {"ok": False, "mode": "redis", "reason": f"ping 失败: {e}"}
+    return {
+        "ok": False,
+        "mode": "memory-fallback",
+        "reason": "Redis 未连接（未注入 REDIS 凭证或连接失败），会话/验证码存储已降级为进程内存（重启丢失）",
+    }
 
 
 @app.get("/crash")

@@ -10,9 +10,10 @@
             <p class="text-secondary text-sm">管理所有接入 UniSSO 的 OAuth2 客户端应用</p>
         </div>
         <button class="btn btn-primary" onclick="openModal('createAppModal')">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <line x1="12" y1="5" x2="12" y2="19"/>
-                <line x1="5" y1="12" x2="19" y2="12"/>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round" stroke-linejoin="round">
+                <line x1="12" y1="5" x2="12" y2="19" />
+                <line x1="5" y1="12" x2="19" y2="12" />
             </svg>
             注册应用
         </button>
@@ -36,54 +37,60 @@
                     <tr>
                         <td>
                             <div class="flex items-center gap-3">
-                                <div style="width: 40px; height: 40px; background: linear-gradient(135deg, #e0e7ff 0%, #c7d2fe 100%); border-radius: var(--radius); display: flex; align-items: center; justify-content: center; font-size: 0.875rem; font-weight: 700; color: var(--primary); flex-shrink: 0;">
+                                <div
+                                    style="width: 40px; height: 40px; background: linear-gradient(135deg, #e0e7ff 0%, #c7d2fe 100%); border-radius: var(--radius); display: flex; align-items: center; justify-content: center; font-size: 0.875rem; font-weight: 700; color: var(--primary); flex-shrink: 0;">
                                     {{ app.name[:1] }}
                                 </div>
                                 <div>
                                     <div style="font-weight: 600;">{{ app.name }}</div>
                                     {% if app.description %}
-                                        <div class="text-xs text-secondary">{{ app.description[:50] }}{% if app.description|length > 50 %}...{% endif %}</div>
+                                    <div class="text-xs text-secondary">{{ app.description[:50] }}{% if
+                                        app.description|length > 50 %}...{% endif %}</div>
                                     {% endif %}
                                 </div>
                             </div>
                         </td>
                         <td>
-                            <code class="text-xs" style="background: #f1f5f9; padding: 0.25rem 0.5rem; border-radius: var(--radius-sm); font-family: 'SF Mono', monospace; color: var(--primary-dark);">{{ app.client_id }}</code>
+                            <code class="text-xs"
+                                style="background: #f1f5f9; padding: 0.25rem 0.5rem; border-radius: var(--radius-sm); font-family: 'SF Mono', monospace; color: var(--primary-dark);">{{ app.client_id }}</code>
                         </td>
                         <td>
                             {% if app.is_confidential %}
-                                <span class="badge badge-primary">Confidential</span>
+                            <span class="badge badge-primary">Confidential</span>
                             {% else %}
-                                <span class="badge badge-secondary">Public</span>
+                            <span class="badge badge-secondary">Public</span>
                             {% endif %}
                         </td>
                         <td>
                             {% if app.is_active %}
-                                <span class="badge badge-success">启用</span>
+                            <span class="badge badge-success">启用</span>
                             {% else %}
-                                <span class="badge badge-secondary">禁用</span>
+                            <span class="badge badge-secondary">禁用</span>
                             {% endif %}
                         </td>
                         <td>
                             <div style="display: flex; flex-wrap: wrap; gap: 0.25rem;">
                                 {% for scope in app.allowed_scopes %}
-                                    <span class="scope-tag">{{ scope }}</span>
+                                <span class="scope-tag">{{ scope }}</span>
                                 {% endfor %}
                             </div>
                         </td>
                         <td>
                             <div class="flex gap-2">
                                 <button class="btn btn-secondary btn-sm" onclick="showAppDetail('{{ app.id }}')">
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-                                        <circle cx="12" cy="12" r="3"/>
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                        stroke-width="2">
+                                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                                        <circle cx="12" cy="12" r="3" />
                                     </svg>
                                     详情
                                 </button>
-                                <button class="btn btn-danger btn-sm" onclick="deleteApp('{{ app.id }}', '{{ app.name }}')">
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                        <line x1="18" y1="6" x2="6" y2="18"/>
-                                        <line x1="6" y1="6" x2="18" y2="18"/>
+                                <button class="btn btn-danger btn-sm"
+                                    onclick="deleteApp('{{ app.id }}', '{{ app.name }}')">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                        stroke-width="2">
+                                        <line x1="18" y1="6" x2="6" y2="18" />
+                                        <line x1="6" y1="6" x2="18" y2="18" />
                                     </svg>
                                     删除
                                 </button>
@@ -104,8 +111,8 @@
             <h3 class="modal-title">注册新应用</h3>
             <button class="modal-close" onclick="closeModal('createAppModal')">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <line x1="18" y1="6" x2="6" y2="18"/>
-                    <line x1="6" y1="6" x2="18" y2="18"/>
+                    <line x1="18" y1="6" x2="6" y2="18" />
+                    <line x1="6" y1="6" x2="18" y2="18" />
                 </svg>
             </button>
         </div>
@@ -120,11 +127,24 @@
             </div>
             <div class="form-group">
                 <label class="form-label">回调地址（每行一个）*</label>
-                <textarea name="redirect_uris" class="form-input" rows="3" required placeholder="http://localhost:3000/callback&#10;https://your-app.com/callback"></textarea>
+                <textarea name="redirect_uris" class="form-input" rows="3" required
+                    placeholder="http://localhost:3000/callback&#10;https://your-app.com/callback"></textarea>
             </div>
             <div class="form-group">
-                <label class="form-label">允许的 Scopes（每行一个）</label>
-                <textarea name="allowed_scopes" class="form-input" rows="3" placeholder="openid&#10;profile&#10;email"></textarea>
+                <label class="form-label">允许的 Scopes（控制应用可请求的权限上限）</label>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-top: 0.5rem;">
+                    {% for item in scope_catalog %}
+                    <label
+                        style="display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0.75rem; background: #f8fafc; border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; font-size: 0.875rem;">
+                        <input type="checkbox" name="allowed_scopes" value="{{ item.name }}" {% if item.name=='openid'
+                            %}checked{% endif %} style="accent-color: var(--primary);">
+                        <span>{{ item.description }}</span>
+                        <code
+                            style="margin-left: auto; font-size: 0.7rem; color: var(--text-secondary);">{{ item.name }}</code>
+                    </label>
+                    {% endfor %}
+                </div>
+                <p class="text-xs text-secondary" style="margin-top: 0.5rem;">openid 为基础权限（用户唯一标识），建议默认勾选。</p>
             </div>
             <div class="form-group">
                 <label class="form-label">主页 URL</label>
@@ -132,7 +152,8 @@
             </div>
             <div class="form-group">
                 <label class="form-label" style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
-                    <input type="checkbox" name="is_confidential" checked style="width: 18px; height: 18px; accent-color: var(--primary);">
+                    <input type="checkbox" name="is_confidential" checked
+                        style="width: 18px; height: 18px; accent-color: var(--primary);">
                     <span>Confidential 客户端（有 secret）</span>
                 </label>
             </div>
@@ -151,8 +172,8 @@
             <h3 class="modal-title">应用详情</h3>
             <button class="modal-close" onclick="closeModal('appDetailModal')">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <line x1="18" y1="6" x2="6" y2="18"/>
-                    <line x1="6" y1="6" x2="18" y2="18"/>
+                    <line x1="18" y1="6" x2="6" y2="18" />
+                    <line x1="6" y1="6" x2="18" y2="18" />
                 </svg>
             </button>
         </div>
@@ -162,55 +183,55 @@
 
 {% block extra_js %}
 <script>
-function openModal(id) {
-    document.getElementById(id).classList.add('active');
-}
-function closeModal(id) {
-    document.getElementById(id).classList.remove('active');
-}
-
-async function createApp(e) {
-    e.preventDefault();
-    const form = e.target;
-    const data = {
-        name: form.name.value,
-        description: form.description.value,
-        redirect_uris: form.redirect_uris.value.split('\n').filter(s => s.trim()),
-        allowed_scopes: form.allowed_scopes.value.split('\n').filter(s => s.trim()),
-        homepage_url: form.homepage_url.value || null,
-        is_confidential: form.is_confidential.checked,
-    };
-
-    try {
-        const res = await fetch('{{ root_path }}/api/apps', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(data),
-        });
-        const result = await res.json();
-        if (res.ok) {
-            alert(`应用创建成功！\n\nClient ID: ${result.client_id}\nClient Secret: ${result.client_secret || '(Public 客户端无 secret)'}\n\n请妥善保存 Client Secret，它只会显示一次。`);
-            closeModal('createAppModal');
-            location.reload();
-        } else {
-            alert('创建失败: ' + (result.error || '未知错误'));
-        }
-    } catch (err) {
-        alert('请求失败: ' + err.message);
+    function openModal(id) {
+        document.getElementById(id).classList.add('active');
     }
-    return false;
-}
+    function closeModal(id) {
+        document.getElementById(id).classList.remove('active');
+    }
 
-async function showAppDetail(appId) {
-    try {
-        const res = await fetch(`/api/apps/${appId}`);
-        const app = await res.json();
-        if (!res.ok) {
-            alert('获取详情失败');
-            return;
+    async function createApp(e) {
+        e.preventDefault();
+        const form = e.target;
+        const data = {
+            name: form.name.value,
+            description: form.description.value,
+            redirect_uris: form.redirect_uris.value.split('\n').filter(s => s.trim()),
+            allowed_scopes: Array.from(form.querySelectorAll('input[name="allowed_scopes"]:checked')).map(cb => cb.value),
+            homepage_url: form.homepage_url.value || null,
+            is_confidential: form.is_confidential.checked,
+        };
+
+        try {
+            const res = await fetch('{{ root_path }}/api/apps', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data),
+            });
+            const result = await res.json();
+            if (res.ok) {
+                alert(`应用创建成功！\n\nClient ID: ${result.client_id}\nClient Secret: ${result.client_secret || '(Public 客户端无 secret)'}\n\n请妥善保存 Client Secret，它只会显示一次。`);
+                closeModal('createAppModal');
+                location.reload();
+            } else {
+                alert('创建失败: ' + (result.error || '未知错误'));
+            }
+        } catch (err) {
+            alert('请求失败: ' + err.message);
         }
+        return false;
+    }
 
-        document.getElementById('appDetailContent').innerHTML = `
+    async function showAppDetail(appId) {
+        try {
+            const res = await fetch(`/api/apps/${appId}`);
+            const app = await res.json();
+            if (!res.ok) {
+                alert('获取详情失败');
+                return;
+            }
+
+            document.getElementById('appDetailContent').innerHTML = `
             <div class="form-group">
                 <label class="form-label">应用名称</label>
                 <input type="text" class="form-input" value="${app.name}" readonly>
@@ -232,42 +253,42 @@ async function showAppDetail(appId) {
                 <button class="btn btn-secondary" onclick="closeModal('appDetailModal')">关闭</button>
             </div>
         `;
-        openModal('appDetailModal');
-    } catch (err) {
-        alert('请求失败: ' + err.message);
-    }
-}
-
-async function resetSecret(appId) {
-    if (!confirm('确定要重置 Client Secret 吗？旧 secret 将立即失效。')) return;
-    try {
-        const res = await fetch(`/api/apps/${appId}/reset-secret`, { method: 'POST' });
-        const result = await res.json();
-        if (res.ok) {
-            alert(`Secret 已重置！\n\n新的 Client Secret: ${result.client_secret}\n\n请立即保存。`);
-            closeModal('appDetailModal');
-        } else {
-            alert('重置失败: ' + (result.error || '未知错误'));
+            openModal('appDetailModal');
+        } catch (err) {
+            alert('请求失败: ' + err.message);
         }
-    } catch (err) {
-        alert('请求失败: ' + err.message);
     }
-}
 
-async function deleteApp(appId, appName) {
-    if (!confirm(`确定要删除应用 "${appName}" 吗？此操作不可撤销。`)) return;
-    try {
-        const res = await fetch(`/api/apps/${appId}`, { method: 'DELETE' });
-        if (res.ok) {
-            location.reload();
-        } else {
+    async function resetSecret(appId) {
+        if (!confirm('确定要重置 Client Secret 吗？旧 secret 将立即失效。')) return;
+        try {
+            const res = await fetch(`/api/apps/${appId}/reset-secret`, { method: 'POST' });
             const result = await res.json();
-            alert('删除失败: ' + (result.error || '未知错误'));
+            if (res.ok) {
+                alert(`Secret 已重置！\n\n新的 Client Secret: ${result.client_secret}\n\n请立即保存。`);
+                closeModal('appDetailModal');
+            } else {
+                alert('重置失败: ' + (result.error || '未知错误'));
+            }
+        } catch (err) {
+            alert('请求失败: ' + err.message);
         }
-    } catch (err) {
-        alert('请求失败: ' + err.message);
     }
-}
+
+    async function deleteApp(appId, appName) {
+        if (!confirm(`确定要删除应用 "${appName}" 吗？此操作不可撤销。`)) return;
+        try {
+            const res = await fetch(`/api/apps/${appId}`, { method: 'DELETE' });
+            if (res.ok) {
+                location.reload();
+            } else {
+                const result = await res.json();
+                alert('删除失败: ' + (result.error || '未知错误'));
+            }
+        } catch (err) {
+            alert('请求失败: ' + err.message);
+        }
+    }
 </script>
 {% endblock %}
 {% endblock %}

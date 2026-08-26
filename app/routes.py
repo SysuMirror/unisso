@@ -13,6 +13,7 @@ from typing import Optional
 from fastapi import APIRouter, Request, Depends, Form, Query, HTTPException, status
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from sqlalchemy import select, and_
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -37,14 +38,15 @@ from app.auth import (
     get_cookie_settings, create_csrf_token, get_csrf_token, validate_csrf_token,
 )
 from app.oauth2_server import (
-    handle_authorize, handle_token, introspect_token, get_userinfo,
+    handle_authorize, handle_token, introspect_token, get_userinfo_from_token,
+    issue_code_for_consent, compute_effective_scopes,
     create_or_update_consent, revoke_consent, get_user_consent,
     verify_client, get_application_by_client_id,
 )
+from app.scope_definitions import scope_description, supported_scopes
 from app.security import (
     generate_client_id, generate_client_secret, hash_password,
-    verify_password, create_access_token, decode_token,
-    scopes_to_list, list_to_scopes, validate_password_strength,
+    verify_password, scopes_to_list, validate_password_strength,
 )
 from app.redis_client import redis_client
 from app.config import get_settings
@@ -216,11 +218,12 @@ async def authorize_page(
 
     app = result["application"]
     scopes = result["scopes"]
+    scope_items = [{"name": s, "description": scope_description(s)} for s in scopes]
     return templates.TemplateResponse(request, "authorize.html", {
         "request": request,
         "user": user,
         "application": app,
-        "scopes": scopes,
+        "scope_items": scope_items,
         "client_id": client_id,
         "redirect_uri": redirect_uri,
         "scope": scope,
@@ -267,10 +270,17 @@ async def admin_apps_page(
     result = await db.execute(select(Application))
     apps = result.scalars().all()
 
+    from app.scope_definitions import SCOPE_DEFINITIONS
+    scope_catalog = [
+        {"name": s, "description": SCOPE_DEFINITIONS[s][1]}
+        for s in supported_scopes()
+    ]
+
     return templates.TemplateResponse(request, "admin_apps.html", {
         "request": request,
         "user": user,
         "applications": apps,
+        "scope_catalog": scope_catalog,
         "app_name": _settings.app_name,
     })
 
@@ -477,39 +487,38 @@ async def api_authorize(
     request: Request,
     client_id: str = Form(...),
     redirect_uri: str = Form(...),
-    scope: str = Form("openid profile"),
+    scope: str = Form("openid"),
     state: Optional[str] = Form(None),
     code_challenge: Optional[str] = Form(None),
     code_challenge_method: Optional[str] = Form("S256"),
     approved: bool = Form(False),
+    scopes: Optional[list] = Form(None),
     user: User = Depends(require_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """用户确认授权"""
-    from app.oauth2_server import create_authorization_code
-
+    """用户确认授权（支持按 scope 勾选）"""
     if not approved:
         error_redirect = f"{redirect_uri}?error=access_denied"
         if state:
             error_redirect += f"&state={state}"
         return RedirectResponse(error_redirect, status_code=status.HTTP_302_FOUND)
 
-    app = await verify_client(db, client_id, redirect_uri=redirect_uri)
-    requested_scopes = scopes_to_list(scope)
-    valid_scopes = [s for s in requested_scopes if s in app.allowed_scopes or s in ("openid", "profile", "email")]
+    # 勾选的 scope 优先；未勾选任何项时回退到请求的 scope
+    approved_scopes = scopes if scopes else scopes_to_list(scope)
 
-    await create_or_update_consent(db, user.id, app.id, valid_scopes)
-    await db.commit()
-
-    code = await create_authorization_code(
+    req = AuthorizeRequest(
+        response_type="code",
         client_id=client_id,
-        user_id=user.id,
         redirect_uri=redirect_uri,
-        scope=list_to_scopes(valid_scopes),
+        scope=scope,
+        state=state,
         code_challenge=code_challenge,
         code_challenge_method=code_challenge_method,
-        state=state,
     )
+
+    client_ip = _get_client_ip(request)
+    code = await issue_code_for_consent(db, req, user, approved_scopes, client_ip=client_ip)
+    await db.commit()
 
     redirect = f"{redirect_uri}?code={code}"
     if state:
@@ -555,12 +564,16 @@ async def api_introspect(
     return await introspect_token(token, db)
 
 
-@router.get("/api/oauth/userinfo", response_model=UserInfo)
+@router.get("/api/oauth/userinfo", response_model=UserInfo, response_model_exclude_none=True)
 async def api_userinfo(
+    request: Request,
     user: User = Depends(require_token_user),
+    db: AsyncSession = Depends(get_db),
 ):
-    """OIDC UserInfo 端点"""
-    return await get_userinfo(user)
+    """OIDC UserInfo 端点（按 effective scopes 过滤 claims）"""
+    auth = request.headers.get("authorization", "")
+    token = auth.removeprefix("Bearer ").strip()
+    return await get_userinfo_from_token(db, token)
 
 
 @router.get("/.well-known/openid-configuration")
@@ -578,7 +591,7 @@ async def openid_configuration(request: Request):
         "grant_types_supported": ["authorization_code", "refresh_token"],
         "subject_types_supported": ["public"],
         "id_token_signing_alg_values_supported": ["HS256"],
-        "scopes_supported": ["openid", "profile", "email"],
+        "scopes_supported": supported_scopes(),
         "token_endpoint_auth_methods_supported": ["client_secret_post", "client_secret_basic"],
         "code_challenge_methods_supported": ["S256", "plain"],
     }
@@ -604,7 +617,7 @@ async def jwks():
 
 @router.get("/api/apps", response_model=list[ApplicationResponse])
 async def list_apps(
-    user: User = Depends(require_token_user),
+    user: User = Depends(require_auth_user),
     db: AsyncSession = Depends(get_db),
 ):
     """列出应用"""
@@ -620,7 +633,7 @@ async def list_apps(
 @router.post("/api/apps", response_model=ApplicationResponse)
 async def create_app(
     data: ApplicationCreate,
-    user: User = Depends(require_token_user),
+    user: User = Depends(require_auth_user),
     db: AsyncSession = Depends(get_db),
 ):
     """注册新应用"""
@@ -642,6 +655,8 @@ async def create_app(
     db.add(app)
     await db.flush()
     await db.refresh(app)
+    # 应用创建即返回 client_secret，必须先落库（否则客户端立即发起 /authorize 会查不到应用）
+    await db.commit()
 
     response = ApplicationResponse.model_validate(app)
     response.client_secret = raw_secret
@@ -651,7 +666,7 @@ async def create_app(
 @router.get("/api/apps/{app_id}", response_model=ApplicationResponse)
 async def get_app(
     app_id: str,
-    user: User = Depends(require_token_user),
+    user: User = Depends(require_auth_user),
     db: AsyncSession = Depends(get_db),
 ):
     """获取应用详情"""
@@ -668,7 +683,7 @@ async def get_app(
 async def update_app(
     app_id: str,
     data: ApplicationUpdate,
-    user: User = Depends(require_token_user),
+    user: User = Depends(require_auth_user),
     db: AsyncSession = Depends(get_db),
 ):
     """更新应用"""
@@ -696,13 +711,14 @@ async def update_app(
 
     await db.flush()
     await db.refresh(app)
+    await db.commit()
     return ApplicationResponse.model_validate(app)
 
 
 @router.delete("/api/apps/{app_id}")
 async def delete_app(
     app_id: str,
-    user: User = Depends(require_token_user),
+    user: User = Depends(require_auth_user),
     db: AsyncSession = Depends(get_db),
 ):
     """删除应用"""
@@ -715,13 +731,14 @@ async def delete_app(
 
     await db.delete(app)
     await db.flush()
+    await db.commit()
     return {"ok": True, "message": "应用已删除"}
 
 
 @router.post("/api/apps/{app_id}/reset-secret")
 async def reset_app_secret(
     app_id: str,
-    user: User = Depends(require_token_user),
+    user: User = Depends(require_auth_user),
     db: AsyncSession = Depends(get_db),
 ):
     """重置应用密钥"""
@@ -735,6 +752,7 @@ async def reset_app_secret(
     new_secret = generate_client_secret()
     app.client_secret = hash_password(new_secret)
     await db.flush()
+    await db.commit()
     return {"ok": True, "client_id": app.client_id, "client_secret": new_secret}
 
 
@@ -742,13 +760,15 @@ async def reset_app_secret(
 
 @router.get("/api/consents", response_model=list)
 async def list_consents(
-    user: User = Depends(require_token_user),
+    user: User = Depends(require_auth_user),
     db: AsyncSession = Depends(get_db),
 ):
     """列出当前用户的授权记录"""
     result = await db.execute(
-        select(UserConsent).where(
-            and_(UserConsent.user_id == user.id, UserConsent.is_active == True)
+        select(UserConsent)
+        .options(selectinload(UserConsent.application))
+        .where(
+            and_(UserConsent.user_id == user.id, UserConsent.is_active == True)  # noqa: E712
         )
     )
     consents = result.scalars().all()
@@ -777,7 +797,9 @@ async def update_consent(
 ):
     """更新授权范围"""
     result = await db.execute(
-        select(UserConsent).where(
+        select(UserConsent)
+        .options(selectinload(UserConsent.application))
+        .where(
             and_(UserConsent.id == consent_id, UserConsent.user_id == user.id)
         )
     )
@@ -786,21 +808,24 @@ async def update_consent(
         raise HTTPException(status_code=404, detail="授权记录不存在")
 
     app = consent.application
-    valid_scopes = [s for s in data.scopes if s in app.allowed_scopes or s in ("openid", "profile", "email")]
+    valid_scopes = compute_effective_scopes(data.scopes, app.allowed_scopes)
     consent.scopes = valid_scopes
     await db.flush()
+    await db.commit()
     return {"ok": True, "scopes": valid_scopes}
 
 
 @router.delete("/api/consents/{consent_id}")
 async def delete_consent(
     consent_id: str,
-    user: User = Depends(require_token_user),
+    user: User = Depends(require_auth_user),
     db: AsyncSession = Depends(get_db),
 ):
     """撤销授权"""
     result = await db.execute(
-        select(UserConsent).where(
+        select(UserConsent)
+        .options(selectinload(UserConsent.application))
+        .where(
             and_(UserConsent.id == consent_id, UserConsent.user_id == user.id)
         )
     )
@@ -808,18 +833,18 @@ async def delete_consent(
     if not consent:
         raise HTTPException(status_code=404, detail="授权记录不存在")
 
-    from datetime import datetime, timezone
-    consent.is_active = False
-    consent.revoked_at = datetime.now(timezone.utc)
+    # 撤销 consent 并联动撤销该应用下该用户的全部 token
+    await revoke_consent(db, user.id, consent.application_id, client_id=consent.application.client_id)
     await db.flush()
-    return {"ok": True, "message": "授权已撤销"}
+    await db.commit()
+    return {"ok": True, "message": "授权已撤销，相关令牌已失效"}
 
 
 @router.post("/api/consents/{consent_id}")
 async def delete_consent_post(
     consent_id: str,
     request: Request,
-    user: User = Depends(require_token_user),
+    user: User = Depends(require_auth_user),
     db: AsyncSession = Depends(get_db),
 ):
     """撤销授权（Form 兼容）"""

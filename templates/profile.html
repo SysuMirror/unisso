@@ -63,6 +63,10 @@
                 <span class="text-sm text-secondary">姓名</span>
                 <span class="text-sm font-semibold">{{ user.full_name or '未设置' }}</span>
             </div>
+            <div class="flex items-center justify-between" style="padding: 1rem; background: #f8fafc; border-radius: var(--radius); border: 1px solid var(--border);">
+                <span class="text-sm text-secondary">学号</span>
+                <span class="text-sm font-semibold">{{ user.student_id or '未设置' }}</span>
+            </div>
         </div>
     </div>
 

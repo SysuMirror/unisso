@@ -38,6 +38,7 @@ class UserCreate(BaseModel):
 class UserUpdate(BaseModel):
     username: Optional[str] = None
     full_name: Optional[str] = None
+    student_id: Optional[str] = None
     avatar: Optional[str] = None
     is_active: Optional[bool] = None
 
@@ -50,6 +51,7 @@ class UserResponse(BaseModel):
     email_verified: bool
     username: Optional[str] = None
     full_name: Optional[str] = None
+    student_id: Optional[str] = None
     avatar: Optional[str] = None
     is_active: bool
     is_admin: bool
@@ -65,12 +67,18 @@ class UserLogin(BaseModel):
 
 
 class UserInfo(BaseModel):
-    """OIDC userinfo 响应"""
+    """OIDC userinfo 响应：仅输出 effective scopes 允许的 claims，sub 永远返回
+
+    配合端点的 response_model_exclude_none，未授权 claim 不出现在响应中
+    """
     sub: str
-    email: str
     preferred_username: Optional[str] = None
     name: Optional[str] = None
-    roles: List[str] = []
+    picture: Optional[str] = None
+    student_id: Optional[str] = None
+    email: Optional[str] = None
+    email_verified: Optional[bool] = None
+    roles: Optional[List[str]] = None
 
 
 # ==================== 外部身份绑定 ====================
@@ -142,7 +150,8 @@ class ApplicationBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=128)
     description: Optional[str] = None
     redirect_uris: List[str] = []
-    allowed_scopes: List[str] = []
+    # 默认仅授予基础身份标识，按需在勾选面板中扩充
+    allowed_scopes: List[str] = ["openid"]
     homepage_url: Optional[str] = None
     callback_url: Optional[str] = None
     is_confidential: bool = True

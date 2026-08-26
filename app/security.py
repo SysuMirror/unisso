@@ -150,6 +150,11 @@ def generate_token() -> str:
     return secrets.token_urlsafe(32)
 
 
+def generate_jti() -> str:
+    """生成 JWT 唯一标识（用于落库撤销）"""
+    return secrets.token_urlsafe(16)
+
+
 # ==================== PKCE ====================
 
 def generate_pkce_challenge() -> tuple[str, str]:
@@ -198,25 +203,31 @@ def _get_issuer() -> str:
     return _settings.public_url or "unisso"
 
 
+def access_token_expiry(now: Optional[datetime] = None) -> datetime:
+    """access token 过期时间（单一事实来源，签发与落库共用）"""
+    now = now or datetime.now(timezone.utc)
+    return now + timedelta(minutes=_settings.jwt_access_token_expire_minutes)
+
+
+def refresh_token_expiry(now: Optional[datetime] = None) -> datetime:
+    """refresh token 过期时间（单一事实来源，签发与落库共用）"""
+    now = now or datetime.now(timezone.utc)
+    return now + timedelta(days=_settings.jwt_refresh_token_expire_days)
+
+
 def create_access_token(
     subject: str,
     client_id: str,
     scope: str = "",
-    extra_claims: Optional[Dict[str, Any]] = None,
+    jti: Optional[str] = None,
 ) -> str:
     """创建 JWT access token（加固版）
 
-    包含：
-    - iss (issuer)
-    - aud (audience)
-    - jti (唯一标识，用于撤销)
-    - iat (签发时间)
-    - exp (过期时间)
-    - sub (主题/用户ID)
-    - type (token 类型)
+    禁止携带任何 PII（姓名/邮箱/学号等），仅包含身份指向与授权信息：
+    - iss / aud / sub / client_id / scope / type / iat / exp / jti
+    - jti 落库用于主动撤销
     """
     now = datetime.now(timezone.utc)
-    expire = now + timedelta(minutes=_settings.jwt_access_token_expire_minutes)
 
     payload = {
         "sub": subject,
@@ -224,15 +235,11 @@ def create_access_token(
         "scope": scope,
         "type": "access",
         "iat": now,
-        "exp": expire,
-        "jti": secrets.token_urlsafe(16),
+        "exp": access_token_expiry(now),
+        "jti": jti or generate_jti(),
         "iss": _get_issuer(),
         "aud": client_id,
     }
-    if extra_claims:
-        # 防止覆盖标准声明
-        safe_claims = {k: v for k, v in extra_claims.items() if k not in payload}
-        payload.update(safe_claims)
 
     return jwt.encode(payload, _settings.secret_key, algorithm="HS256")
 
@@ -241,10 +248,10 @@ def create_refresh_token(
     subject: str,
     client_id: str,
     scope: str = "",
+    jti: Optional[str] = None,
 ) -> str:
     """创建 JWT refresh token（加固版）"""
     now = datetime.now(timezone.utc)
-    expire = now + timedelta(days=_settings.jwt_refresh_token_expire_days)
 
     payload = {
         "sub": subject,
@@ -252,8 +259,8 @@ def create_refresh_token(
         "scope": scope,
         "type": "refresh",
         "iat": now,
-        "exp": expire,
-        "jti": secrets.token_urlsafe(16),
+        "exp": refresh_token_expiry(now),
+        "jti": jti or generate_jti(),
         "iss": _get_issuer(),
         "aud": client_id,
     }
@@ -263,32 +270,28 @@ def create_refresh_token(
 
 def create_id_token(
     user_id: str,
-    username: str,
-    email: Optional[str] = None,
-    full_name: Optional[str] = None,
-    extra_claims: Optional[Dict[str, Any]] = None,
+    client_id: str,
+    claims: Optional[Dict[str, Any]] = None,
 ) -> str:
-    """创建 OIDC ID Token（加固版）"""
+    """创建 OIDC ID Token
+
+    claims 由调用方按 effective scopes 过滤后传入（隐私信息仅放在 id_token
+    与 userinfo，不进入 access_token）。
+    """
     now = datetime.now(timezone.utc)
-    expire = now + timedelta(minutes=_settings.jwt_id_token_expire_minutes)
 
     payload = {
         "sub": user_id,
-        "preferred_username": username,
         "type": "id",
         "iat": now,
-        "exp": expire,
-        "jti": secrets.token_urlsafe(16),
+        "exp": now + timedelta(minutes=_settings.jwt_id_token_expire_minutes),
+        "jti": generate_jti(),
         "iss": _get_issuer(),
-        "aud": "unisso_clients",  # ID token 的 audience 是客户端群体
+        "aud": client_id,
     }
-    if email:
-        payload["email"] = email
-    if full_name:
-        payload["name"] = full_name
-    if extra_claims:
-        safe_claims = {k: v for k, v in extra_claims.items() if k not in payload}
-        payload.update(safe_claims)
+    if claims:
+        # 防止覆盖标准声明
+        payload.update({k: v for k, v in claims.items() if k not in payload})
 
     return jwt.encode(payload, _settings.secret_key, algorithm="HS256")
 
@@ -300,7 +303,12 @@ def decode_token(token: str, audience: Optional[str] = None) -> Optional[Dict[st
     可选验证 audience。
     """
     try:
-        options = {"verify_exp": True, "verify_alg": True}
+        # jose 在 token 含 aud 且未传 audience 时会强制校验失败，故仅在显式传入时启用
+        options = {
+            "verify_exp": True,
+            "verify_alg": True,
+            "verify_aud": audience is not None,
+        }
         kwargs = {"algorithms": ["HS256"], "options": options}
         if audience:
             kwargs["audience"] = audience

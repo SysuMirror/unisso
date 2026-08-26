@@ -55,6 +55,8 @@ class User(Base):
     # 显示昵称（可选，不用于登录）
     username: Mapped[Optional[str]] = mapped_column(String(64), unique=True, index=True, nullable=True)
     full_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    # 学号（profile:student_id scope 授权后对外输出）
+    student_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     avatar: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
