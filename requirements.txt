@@ -6,7 +6,8 @@ alembic>=1.13.0
 redis>=5.0.0
 pyjwt>=2.8.0
 passlib[bcrypt]>=1.7.4
-bcrypt<4.2
+# passlib 1.7.4 读取 bcrypt.__about__.__version__，bcrypt>=4.1 移除该属性会刷 traceback（功能不受影响）
+bcrypt<4.1
 python-multipart>=0.0.9
 jinja2>=3.1.0
 python-dotenv>=1.0.0
