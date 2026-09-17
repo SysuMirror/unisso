@@ -9,7 +9,8 @@ fi
 req_hash=".venv/.requirements.sha256"
 current_hash="$(sha256sum requirements.txt | cut -d' ' -f1)"
 if [ ! -f "$req_hash" ] || [ "$(cat "$req_hash")" != "$current_hash" ]; then
-    .venv/bin/pip install -q --disable-pip-version-check -r requirements.txt
+    .venv/bin/pip install -q --disable-pip-version-check \
+        -i https://mirrors.aliyun.com/pypi/simple/ -r requirements.txt
     echo "$current_hash" > "$req_hash"
 fi
 exec .venv/bin/python start.py
