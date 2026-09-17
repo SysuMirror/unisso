@@ -76,6 +76,7 @@
             <input type="hidden" name="client_id" value="{{ client_id }}">
             <input type="hidden" name="redirect_uri" value="{{ redirect_uri }}">
             <input type="hidden" name="scope" value="{{ scope }}">
+            {% if nonce %}<input type="hidden" name="nonce" value="{{ nonce }}">{% endif %}
             {% if state %}<input type="hidden" name="state" value="{{ state }}">{% endif %}
             {% if code_challenge %}<input type="hidden" name="code_challenge" value="{{ code_challenge }}">{% endif
             %}

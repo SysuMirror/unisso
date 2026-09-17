@@ -9,9 +9,11 @@
 """
 import json
 from typing import Optional
+from urllib.parse import urlencode, urlsplit, urlunsplit, parse_qsl
 
 from fastapi import APIRouter, Request, Depends, Form, Query, HTTPException, status
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+from pydantic import ValidationError
 from sqlalchemy import select, and_
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,23 +21,33 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models import User, Application, UserConsent, Role, Permission, UserIdentity
 from app.schemas import (
-    UserCreate, UserLogin, UserUpdate, UserResponse,
+    UserCreate, UserLogin, UserUpdate, UserResponse, RegistrationStartRequest,
     UserIdentityCreate, UserIdentityResponse,
-    ApplicationCreate, ApplicationUpdate, ApplicationResponse,
+    ApplicationCreate, ApplicationUpdate, ApplicationResponse, ApplicationCreatedResponse,
     AuthorizeRequest, TokenRequest, TokenResponse,
     IntrospectResponse, UserInfo, ConsentUpdate,
     StandardResponse, ErrorResponse,
+)
+from app.registration import (
+    RegistrationConflict,
+    RegistrationRateLimited,
+    RegistrationVerifyRequest,
+    PendingRegistrationError,
+    EmailDeliveryUnavailable,
+    InvalidRegistrationCode,
+    consume_verified_registration,
+    create_pending_registration,
+    resend_pending_registration,
 )
 from app.auth import (
     authenticate_user, create_user, get_user_by_id, get_user_by_email,
     get_user_by_username, update_user, create_session, get_session, delete_session,
     require_user, require_admin, get_current_user_from_session,
     get_current_user_from_token, require_token_user, require_auth_user,
-    check_permission, init_default_data,
     get_user_identity, get_user_identities_by_user, bind_identity, unbind_identity,
     is_sysu_email,
     check_login_attempts, record_login_failure, clear_login_attempts,
-    get_cookie_settings, create_csrf_token, get_csrf_token, validate_csrf_token,
+    get_cookie_settings,
 )
 from app.oauth2_server import (
     handle_authorize, handle_token, introspect_token, get_userinfo_from_token,
@@ -50,6 +62,8 @@ from app.security import (
 )
 from app.redis_client import redis_client
 from app.config import get_settings
+from app.token_keys import canonical_issuer, public_jwks
+from app.request_security import issue_csrf_token, get_client_ip, safe_next_url
 from app.storage import upload_file, get_file_url, delete_file
 from app.audit import (
     log_login, log_register, log_authorize, log_token_issue,
@@ -59,6 +73,12 @@ from app.audit import (
 _settings = get_settings()
 
 router = APIRouter()
+
+
+def _callback_url(uri, **params):
+    parts = urlsplit(uri)
+    query = parse_qsl(parts.query, keep_blank_values=True) + [(k, v) for k, v in params.items() if v is not None]
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
 
 
 def _url(path: str) -> str:
@@ -72,16 +92,7 @@ def _url(path: str) -> str:
 # ==================== 辅助函数 ====================
 
 def _get_client_ip(request: Request) -> str:
-    """获取真实客户端 IP"""
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    real_ip = request.headers.get("x-real-ip")
-    if real_ip:
-        return real_ip.strip()
-    if request.client:
-        return request.client.host
-    return "unknown"
+    return get_client_ip(request)
 
 
 def _get_user_agent(request: Request) -> Optional[str]:
@@ -90,7 +101,7 @@ def _get_user_agent(request: Request) -> Optional[str]:
 
 # 允许的图片 MIME 类型
 ALLOWED_IMAGE_TYPES = {
-    "image/jpeg", "image/png", "image/gif", "image/webp", "image/svg+xml"
+    "image/jpeg", "image/png", "image/gif", "image/webp"
 }
 
 
@@ -105,22 +116,14 @@ def _validate_image_file(content_type: Optional[str], content: bytes) -> bool:
         b"\x89PNG\r\n\x1a\n": "image/png",
         b"GIF87a": "image/gif",
         b"GIF89a": "image/gif",
-        b"<?xml": "image/svg+xml",
-        b"<svg": "image/svg+xml",
     }
     for header, expected_type in magic.items():
         if content.startswith(header):
-            return content_type == expected_type or (expected_type == "image/svg+xml" and content_type in ("image/svg+xml", "image/png"))
+            return content_type == expected_type
 
     # WebP 魔数
     if content.startswith(b"RIFF") and content[8:12] == b"WEBP":
         return content_type == "image/webp"
-
-    # SVG 可能没有 XML 声明
-    if content_type == "image/svg+xml":
-        content_str = content[:200].decode("utf-8", errors="ignore").lower()
-        if "<svg" in content_str:
-            return True
 
     return False
 
@@ -132,7 +135,7 @@ async def index(request: Request, user: Optional[User] = Depends(get_current_use
     """首页 — 未登录自动跳转登录页"""
     if user is None:
         return RedirectResponse(url="/login", status_code=302)
-    from app.main import templates
+    from app.views import templates
     return templates.TemplateResponse(request, "index.html", {
         "request": request,
         "user": user,
@@ -143,10 +146,10 @@ async def index(request: Request, user: Optional[User] = Depends(get_current_use
 @router.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request, next: Optional[str] = None, error: Optional[str] = None):
     """登录页面"""
-    from app.main import templates
+    from app.views import templates
     return templates.TemplateResponse(request, "login.html", {
         "request": request,
-        "next": next or _url('/'),
+        "next": safe_next_url(next, _url('/')),
         "error": error,
         "app_name": _settings.app_name,
     })
@@ -154,13 +157,50 @@ async def login_page(request: Request, next: Optional[str] = None, error: Option
 
 @router.get("/register", response_class=HTMLResponse)
 async def register_page(request: Request, error: Optional[str] = None):
-    """注册页面"""
-    from app.main import templates
+    from app.views import templates
+    available = _settings.email_registration_available
+    status_code = 200 if available else 403
     return templates.TemplateResponse(request, "register.html", {
         "request": request,
+        "registration_available": available,
         "error": error,
         "app_name": _settings.app_name,
-    })
+    }, status_code=status_code)
+
+
+def _registration_input_error():
+    return RedirectResponse(_url('/register?error=invalid_input'), status_code=303)
+
+
+def _registration_error_page(error: str) -> str:
+    safe_messages = {
+        'email_unavailable': '邮箱验证服务暂时不可用，请稍后重试。',
+        'rate_limited': '操作过于频繁，请稍后再试。',
+        'invalid_code': '验证码无效或已过期。',
+        'conflict': '无法完成验证，请重新注册或联系管理员。',
+    }
+    message = safe_messages.get(error, safe_messages['invalid_code'])
+    return (
+        '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">'
+        f'<title>UniSSO</title></head><body><main><p>{message}</p>'
+        '<p><a href="/verify-email">返回验证页面</a> 或 <a href="/register">重新注册</a></p>'
+        '</main></body></html>'
+    )
+
+
+def templates_response_for_invalid_code(request: Request, email: str, conflict: bool = False):
+    from app.views import templates
+    return templates.TemplateResponse(request, 'verify_email.html', {
+        'request': request,
+        'pending_email': email,
+        'error': 'conflict' if conflict else 'invalid_code',
+        'app_name': _settings.app_name,
+    }, status_code=409 if conflict else 202)
+
+
+async def _require_registration_available():
+    if not _settings.email_registration_available:
+        raise HTTPException(status_code=403, detail='registration_unavailable_pending_email_verification')
 
 
 @router.get("/profile", response_class=HTMLResponse)
@@ -170,7 +210,7 @@ async def profile_page(
     db: AsyncSession = Depends(get_db),
 ):
     """个人中心"""
-    from app.main import templates
+    from app.views import templates
     identities = await get_user_identities_by_user(db, user.id)
     return templates.TemplateResponse(request, "profile.html", {
         "request": request,
@@ -188,13 +228,14 @@ async def authorize_page(
     redirect_uri: str = Query(...),
     scope: str = Query("openid profile"),
     state: Optional[str] = Query(None),
+    nonce: Optional[str] = Query(None),
     code_challenge: Optional[str] = Query(None),
     code_challenge_method: Optional[str] = Query("S256"),
     user: User = Depends(require_user),
     db: AsyncSession = Depends(get_db),
 ):
     """OAuth2 授权确认页面"""
-    from app.main import templates
+    from app.views import templates
 
     req = AuthorizeRequest(
         response_type=response_type,
@@ -202,6 +243,7 @@ async def authorize_page(
         redirect_uri=redirect_uri,
         scope=scope,
         state=state,
+        nonce=nonce,
         code_challenge=code_challenge,
         code_challenge_method=code_challenge_method,
     )
@@ -211,9 +253,7 @@ async def authorize_page(
 
     if result.get("auto_approved"):
         code = result["code"]
-        redirect = f"{redirect_uri}?code={code}"
-        if state:
-            redirect += f"&state={state}"
+        redirect = _callback_url(redirect_uri, code=code, state=state)
         return RedirectResponse(redirect, status_code=status.HTTP_302_FOUND)
 
     app = result["application"]
@@ -228,6 +268,7 @@ async def authorize_page(
         "redirect_uri": redirect_uri,
         "scope": scope,
         "state": state,
+        "nonce": nonce,
         "code_challenge": code_challenge,
         "code_challenge_method": code_challenge_method,
         "app_name": _settings.app_name,
@@ -241,10 +282,10 @@ async def consents_page(
     db: AsyncSession = Depends(get_db),
 ):
     """我的授权管理页面"""
-    from app.main import templates
+    from app.views import templates
 
     result = await db.execute(
-        select(UserConsent).where(
+        select(UserConsent).options(selectinload(UserConsent.application)).where(
             and_(UserConsent.user_id == user.id, UserConsent.is_active == True)
         )
     )
@@ -265,7 +306,7 @@ async def admin_apps_page(
     db: AsyncSession = Depends(get_db),
 ):
     """应用管理页面"""
-    from app.main import templates
+    from app.views import templates
 
     result = await db.execute(select(Application))
     apps = result.scalars().all()
@@ -292,9 +333,9 @@ async def admin_users_page(
     db: AsyncSession = Depends(get_db),
 ):
     """用户管理页面"""
-    from app.main import templates
+    from app.views import templates
 
-    result = await db.execute(select(User))
+    result = await db.execute(select(User).options(selectinload(User.roles).selectinload(Role.permissions), selectinload(User.identities)))
     users = result.scalars().all()
 
     return templates.TemplateResponse(request, "admin_users.html", {
@@ -309,14 +350,11 @@ async def admin_users_page(
 
 @router.get("/api/csrf-token")
 async def get_csrf_token_endpoint(request: Request):
-    """获取 CSRF token（需要已有 session 或生成临时 token）"""
-    session_id = request.cookies.get("unisso_session")
-    if session_id:
-        token = await create_csrf_token(session_id)
-    else:
-        # 无 session 时生成一次性 token（用于登录/注册页面）
-        token = await create_csrf_token(f"anon_{_get_client_ip(request)}")
-    return {"csrf_token": token}
+    response = JSONResponse({})
+    token = await issue_csrf_token(request, response)
+    response.body = __import__('json').dumps({"csrf_token": token}).encode()
+    response.headers["content-length"] = str(len(response.body))
+    return response
 
 
 # ==================== 认证 API（加固版） ====================
@@ -333,8 +371,11 @@ async def api_login(
     client_ip = _get_client_ip(request)
     user_agent = _get_user_agent(request)
 
+    email = email.strip().lower()
+
+    next = safe_next_url(next, _url("/"))
     # 检查登录尝试次数
-    allowed, remaining = await check_login_attempts(client_ip)
+    allowed, remaining = await check_login_attempts(client_ip, email)
     if not allowed:
         log_login(None, client_ip, user_agent, success=False, email=email, reason=f"登录被锁定，剩余 {remaining} 秒")
         return RedirectResponse(
@@ -344,7 +385,7 @@ async def api_login(
 
     user = await authenticate_user(db, email, password)
     if not user:
-        await record_login_failure(client_ip)
+        await record_login_failure(client_ip, email)
         log_login(None, client_ip, user_agent, success=False, email=email, reason="凭证错误")
         return RedirectResponse(
             f"{_url('/login')}?error=invalid_credentials&next={next}",
@@ -352,7 +393,7 @@ async def api_login(
         )
 
     # 登录成功
-    await clear_login_attempts(client_ip)
+    await clear_login_attempts(client_ip, email)
 
     from datetime import datetime, timezone
     user.last_login_at = datetime.now(timezone.utc)
@@ -380,6 +421,80 @@ async def api_logout(request: Request):
     return response
 
 
+@router.get('/verify-email', response_class=HTMLResponse)
+async def verify_email_page(request: Request, error: Optional[str] = None, email: Optional[str] = None):
+    from app.views import templates
+    return templates.TemplateResponse(request, 'verify_email.html', {
+        'request': request,
+        'pending_email': email or '',
+        'error': error,
+        'app_name': _settings.app_name,
+    })
+
+
+@router.post('/api/auth/verify-email')
+async def api_verify_email(
+    request: Request,
+    email: str = Form(...),
+    code: str = Form(...),
+    password: Optional[str] = Form(None),
+    db: AsyncSession = Depends(get_db),
+):
+    client_ip = _get_client_ip(request)
+    user_agent = _get_user_agent(request)
+    if not _settings.email_registration_available:
+        raise HTTPException(status_code=403, detail='registration_unavailable_pending_email_verification')
+    try:
+        data = RegistrationVerifyRequest(email=email, code=code)
+    except ValidationError:
+        return RedirectResponse(
+            _url('/verify-email?error=invalid_code'), status_code=303
+        )
+
+    try:
+        user = await consume_verified_registration(
+            db, data.email, data.code, password=password
+        )
+    except InvalidRegistrationCode:
+        return templates_response_for_invalid_code(request, email)
+    except RegistrationConflict:
+        await db.rollback()
+        return templates_response_for_invalid_code(request, email, conflict=True)
+    except PendingRegistrationError:
+        raise
+
+    session_id = await create_session(user.id, user.username or user.email)
+    log_register(user.id, client_ip, user_agent, True, email=user.email)
+    response = RedirectResponse(_url('/'), status_code=303)
+    response.set_cookie('unisso_session', session_id, **get_cookie_settings(request))
+    return response
+
+
+@router.post('/api/auth/resend-registration')
+async def api_resend_registration(
+    request: Request,
+    email: str = Form(...),
+    db: AsyncSession = Depends(get_db),
+):
+    client_ip = _get_client_ip(request)
+    user_agent = _get_user_agent(request)
+    if not _settings.email_registration_available:
+        raise HTTPException(status_code=403, detail='registration_unavailable_pending_email_verification')
+    try:
+        pending_email = await resend_pending_registration(db, email, client_ip)
+    except RegistrationRateLimited:
+        return RedirectResponse(_url('/verify-email?error=rate_limited'), status_code=303)
+    except EmailDeliveryUnavailable:
+        return HTMLResponse(_registration_error_page('email_unavailable'), status_code=503)
+    except PendingRegistrationError:
+        raise
+
+    log_register(None, client_ip, user_agent, True, email=pending_email)
+    return RedirectResponse(
+        _url('/verify-email'), status_code=303
+    )
+
+
 @router.post("/api/auth/register")
 async def api_register(
     request: Request,
@@ -387,57 +502,41 @@ async def api_register(
     password: str = Form(...),
     username: Optional[str] = Form(None),
     full_name: Optional[str] = Form(None),
+    _: None = Depends(_require_registration_available),
     db: AsyncSession = Depends(get_db),
 ):
-    """注册 API（邮箱+密码，带密码强度验证和审计日志）"""
     client_ip = _get_client_ip(request)
     user_agent = _get_user_agent(request)
-
-    # 验证邮箱格式
-    if not is_sysu_email(email):
-        log_register(None, client_ip, user_agent, success=False, email=email, reason="邮箱格式错误")
-        return RedirectResponse(
-            f"{_url('/register')}?error=invalid_email",
-            status_code=status.HTTP_302_FOUND,
-        )
-
-    # 检查邮箱是否已存在
-    existing = await get_user_by_email(db, email)
-    if existing:
-        log_register(None, client_ip, user_agent, success=False, email=email, reason="邮箱已存在")
-        return RedirectResponse(
-            f"{_url('/register')}?error=email_exists",
-            status_code=status.HTTP_302_FOUND,
-        )
-
-    user_data = UserCreate(
-        email=email,
-        password=password,
-        username=username,
-        full_name=full_name,
-    )
     try:
-        user = await create_user(db, user_data)
-        await db.commit()
-    except ValueError as e:
-        log_register(None, client_ip, user_agent, success=False, email=email, reason=str(e))
-        return RedirectResponse(
-            f"{_url('/register')}?error={str(e)}",
-            status_code=status.HTTP_302_FOUND,
+        data = RegistrationStartRequest(
+            email=email, password=password,
+            username=(username or '').strip() or None,
+            full_name=(full_name or '').strip() or None,
         )
+    except ValidationError:
+        return _registration_input_error()
 
-    # 自动登录
-    session_id = await create_session(user.id, user.username or user.email)
-    log_register(user.id, client_ip, user_agent, success=True, email=email)
+    try:
+        pending_email = await create_pending_registration(db, data, client_ip)
+    except PendingRegistrationError:
+        raise
+    except RegistrationRateLimited:
+        return RedirectResponse(_url('/register?error=rate_limited'), status_code=303)
+    except EmailDeliveryUnavailable:
+        return RedirectResponse(_url('/register?error=email_unavailable'), status_code=303)
 
-    response = RedirectResponse(_url("/"), status_code=status.HTTP_302_FOUND)
-    cookie_opts = get_cookie_settings(request)
-    response.set_cookie(key="unisso_session", value=session_id, **cookie_opts)
-    return response
+    log_register(None, client_ip, user_agent, True, email=pending_email)
+    from app.views import templates
+    return templates.TemplateResponse(request, 'verify_email.html', {
+        'request': request,
+        'pending_email': pending_email,
+        'error': None,
+        'app_name': _settings.app_name,
+    }, status_code=202)
 
 
 @router.get("/api/auth/me", response_model=UserResponse)
-async def api_me(user: User = Depends(require_token_user)):
+async def api_me(user: User = Depends(require_auth_user)):
     """获取当前用户信息（API）"""
     return UserResponse.model_validate(user)
 
@@ -489,6 +588,7 @@ async def api_authorize(
     redirect_uri: str = Form(...),
     scope: str = Form("openid"),
     state: Optional[str] = Form(None),
+    nonce: Optional[str] = Form(None),
     code_challenge: Optional[str] = Form(None),
     code_challenge_method: Optional[str] = Form("S256"),
     approved: bool = Form(False),
@@ -497,14 +597,13 @@ async def api_authorize(
     db: AsyncSession = Depends(get_db),
 ):
     """用户确认授权（支持按 scope 勾选）"""
+    await verify_client(db, client_id, redirect_uri=redirect_uri)
     if not approved:
-        error_redirect = f"{redirect_uri}?error=access_denied"
-        if state:
-            error_redirect += f"&state={state}"
+        error_redirect = _callback_url(redirect_uri, error="access_denied", state=state)
         return RedirectResponse(error_redirect, status_code=status.HTTP_302_FOUND)
 
     # 勾选的 scope 优先；未勾选任何项时回退到请求的 scope
-    approved_scopes = scopes if scopes else scopes_to_list(scope)
+    approved_scopes = scopes or []
 
     req = AuthorizeRequest(
         response_type="code",
@@ -512,6 +611,7 @@ async def api_authorize(
         redirect_uri=redirect_uri,
         scope=scope,
         state=state,
+        nonce=nonce,
         code_challenge=code_challenge,
         code_challenge_method=code_challenge_method,
     )
@@ -520,9 +620,7 @@ async def api_authorize(
     code = await issue_code_for_consent(db, req, user, approved_scopes, client_ip=client_ip)
     await db.commit()
 
-    redirect = f"{redirect_uri}?code={code}"
-    if state:
-        redirect += f"&state={state}"
+    redirect = _callback_url(redirect_uri, code=code, state=state)
     return RedirectResponse(redirect, status_code=status.HTTP_302_FOUND)
 
 
@@ -558,10 +656,16 @@ async def api_token(
 async def api_introspect(
     token: str = Form(...),
     token_type_hint: Optional[str] = Form(None),
+    client_id: str = Form(...),
+    client_secret: str = Form(...),
     db: AsyncSession = Depends(get_db),
 ):
     """Token 验证端点"""
-    return await introspect_token(token, db)
+    client = await verify_client(db, client_id, client_secret=client_secret, authenticate_secret=True)
+    if not client.is_confidential:
+        raise HTTPException(status_code=401, detail="invalid_client")
+    result = await introspect_token(token, db)
+    return result if result.client_id == client_id else IntrospectResponse(active=False)
 
 
 @router.get("/api/oauth/userinfo", response_model=UserInfo, response_model_exclude_none=True)
@@ -579,7 +683,7 @@ async def api_userinfo(
 @router.get("/.well-known/openid-configuration")
 async def openid_configuration(request: Request):
     """OIDC 发现端点"""
-    base_url = str(request.base_url).rstrip("/")
+    base_url = canonical_issuer()
     return {
         "issuer": base_url,
         "authorization_endpoint": f"{base_url}/authorize",
@@ -590,27 +694,16 @@ async def openid_configuration(request: Request):
         "response_types_supported": ["code"],
         "grant_types_supported": ["authorization_code", "refresh_token"],
         "subject_types_supported": ["public"],
-        "id_token_signing_alg_values_supported": ["HS256"],
+        "id_token_signing_alg_values_supported": [_settings.jwt_algorithm],
         "scopes_supported": supported_scopes(),
-        "token_endpoint_auth_methods_supported": ["client_secret_post", "client_secret_basic"],
-        "code_challenge_methods_supported": ["S256", "plain"],
+        "token_endpoint_auth_methods_supported": ["client_secret_post"],
+        "code_challenge_methods_supported": ["S256"],
     }
 
 
 @router.get("/.well-known/jwks.json")
 async def jwks():
-    """JWKS 端点"""
-    import hashlib
-    kid = hashlib.sha256(_settings.secret_key.encode()).hexdigest()[:16]
-    return {
-        "keys": [{
-            "kty": "oct",
-            "kid": kid,
-            "alg": "HS256",
-            "k": _settings.secret_key,
-            "use": "sig",
-        }]
-    }
+    return public_jwks()
 
 
 # ==================== 应用管理 API ====================
@@ -630,7 +723,7 @@ async def list_apps(
     return [ApplicationResponse.model_validate(a) for a in result.scalars().all()]
 
 
-@router.post("/api/apps", response_model=ApplicationResponse)
+@router.post("/api/apps", response_model=ApplicationCreatedResponse)
 async def create_app(
     data: ApplicationCreate,
     user: User = Depends(require_auth_user),
@@ -658,9 +751,10 @@ async def create_app(
     # 应用创建即返回 client_secret，必须先落库（否则客户端立即发起 /authorize 会查不到应用）
     await db.commit()
 
-    response = ApplicationResponse.model_validate(app)
-    response.client_secret = raw_secret
-    return response
+    return ApplicationCreatedResponse(
+        **ApplicationResponse.model_validate(app).model_dump(),
+        client_secret=raw_secret,
+    )
 
 
 @router.get("/api/apps/{app_id}", response_model=ApplicationResponse)
@@ -792,7 +886,7 @@ async def list_consents(
 async def update_consent(
     consent_id: str,
     data: ConsentUpdate,
-    user: User = Depends(require_token_user),
+    user: User = Depends(require_auth_user),
     db: AsyncSession = Depends(get_db),
 ):
     """更新授权范围"""
@@ -863,7 +957,7 @@ async def admin_list_users(
     db: AsyncSession = Depends(get_db),
 ):
     """管理员列出所有用户"""
-    result = await db.execute(select(User))
+    result = await db.execute(select(User).options(selectinload(User.roles).selectinload(Role.permissions), selectinload(User.identities)))
     return [UserResponse.model_validate(u) for u in result.scalars().all()]
 
 
@@ -955,13 +1049,13 @@ async def upload_avatar(
     if not file:
         raise HTTPException(status_code=400, detail="未提供文件")
 
-    content = await file.read()
+    content = await file.read(5 * 1024 * 1024 + 1)
     if len(content) > 5 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="文件超过 5MB")
 
     # MIME 类型 + 魔数双重验证
     if not _validate_image_file(file.content_type, content):
-        raise HTTPException(status_code=400, detail="只允许上传图片文件（JPEG/PNG/GIF/WebP/SVG）")
+        raise HTTPException(status_code=400, detail="只允许上传图片文件（JPEG/PNG/GIF/WebP）")
 
     object_name = await upload_file(
         content,
@@ -995,7 +1089,7 @@ async def get_avatar_url(
 async def upload_app_icon(
     request: Request,
     app_id: str,
-    user: User = Depends(require_token_user),
+    user: User = Depends(require_auth_user),
     db: AsyncSession = Depends(get_db),
 ):
     """上传应用图标到 MinIO（MIME 类型白名单 + 魔数检查）"""
@@ -1012,13 +1106,13 @@ async def upload_app_icon(
     if not file:
         raise HTTPException(status_code=400, detail="未提供文件")
 
-    content = await file.read()
+    content = await file.read(2 * 1024 * 1024 + 1)
     if len(content) > 2 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="文件超过 2MB")
 
     # MIME 类型 + 魔数双重验证
     if not _validate_image_file(file.content_type, content):
-        raise HTTPException(status_code=400, detail="只允许上传图片文件（JPEG/PNG/GIF/WebP/SVG）")
+        raise HTTPException(status_code=400, detail="只允许上传图片文件（JPEG/PNG/GIF/WebP）")
 
     object_name = await upload_file(
         content,
@@ -1041,8 +1135,16 @@ async def upload_app_icon(
 async def get_file(
     object_name: str,
     expires: int = Query(3600, ge=60, le=86400),
+    user: User = Depends(require_auth_user),
+    db: AsyncSession = Depends(get_db),
 ):
-    """获取 MinIO 文件临时访问 URL"""
+    """Only issue URLs for the current user's avatar or owned application icons."""
+    if object_name != user.avatar:
+        query = select(Application.id).where(Application.icon == object_name)
+        if not user.is_admin:
+            query = query.where(Application.owner_id == user.id)
+        if not await db.scalar(query):
+            raise HTTPException(status_code=404, detail="文件不存在")
     url = await get_file_url(object_name, expires=expires)
     if not url:
         raise HTTPException(status_code=404, detail="文件不存在或 MinIO 未配置")

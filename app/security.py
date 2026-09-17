@@ -18,6 +18,7 @@ import jwt
 from passlib.context import CryptContext
 
 from app.config import get_settings
+from app.token_keys import canonical_issuer, signing_material
 
 _settings = get_settings()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -25,6 +26,14 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 # 密码复杂度正则
 PASSWORD_MIN_LENGTH = 8
 PASSWORD_MAX_LENGTH = 128
+COMMON_WEAK_PASSWORDS = {
+    "password", "123456", "12345678", "qwerty", "abc123",
+    "monkey", "letmein", "dragon", "111111", "baseball",
+    "iloveyou", "trustno1", "sunshine", "princess", "admin",
+    "welcome", "shadow", "ashley", "football", "jesus",
+    "michael", "ninja", "mustang", "password1", "123456789",
+    "adobe123", "admin123", "letmein1", "photoshop", "1234567",
+}
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -49,10 +58,7 @@ def validate_password_strength(password: str) -> None:
 
     要求：
     - 最少 8 位，最多 128 位
-    - 包含至少 1 个大写字母
-    - 包含至少 1 个小写字母
-    - 包含至少 1 个数字
-    - 包含至少 1 个特殊字符 (!@#$%^&*()_+-=[]{}|;:,.<>?)
+    - 大写字母、小写字母、数字、符号中至少包含两类
     """
     if len(password) < PASSWORD_MIN_LENGTH:
         raise PasswordValidationError(f"密码长度不能少于 {PASSWORD_MIN_LENGTH} 位")
@@ -60,24 +66,17 @@ def validate_password_strength(password: str) -> None:
     if len(password) > PASSWORD_MAX_LENGTH:
         raise PasswordValidationError(f"密码长度不能超过 {PASSWORD_MAX_LENGTH} 位")
 
-    if not re.search(r'[A-Z]', password):
-        raise PasswordValidationError("密码必须包含至少 1 个大写字母")
-
-    if not re.search(r'[a-z]', password):
-        raise PasswordValidationError("密码必须包含至少 1 个小写字母")
-
-    if not re.search(r'\d', password):
-        raise PasswordValidationError("密码必须包含至少 1 个数字")
-
-    if not re.search(r'[!@#$%^&*()_+\-=\[\]{}|;:,.<>?]', password):
-        raise PasswordValidationError("密码必须包含至少 1 个特殊字符")
+    category_count = sum((
+        bool(re.search(r'[A-Z]', password)),
+        bool(re.search(r'[a-z]', password)),
+        bool(re.search(r'\d', password)),
+        bool(re.search(r'[^A-Za-z0-9\s]', password)),
+    ))
+    if category_count < 2:
+        raise PasswordValidationError("密码至少需要包含两类字符")
 
     # 检查常见弱密码
-    common_weak_passwords = {
-        "password", "12345678", "qwerty", "admin123",
-        "password123", "123456789", "iloveyou", "sunshine",
-    }
-    if password.lower() in common_weak_passwords:
+    if password.lower() in COMMON_WEAK_PASSWORDS:
         raise PasswordValidationError("密码过于常见，请更换")
 
     # 检查连续字符
@@ -91,16 +90,7 @@ def validate_password_strength(password: str) -> None:
 
 def check_password_not_common(password: str) -> bool:
     """检查密码是否在常见弱密码列表中（额外检查）"""
-    # 这里可以扩展为加载更大的弱密码字典
-    common = {
-        "password", "123456", "12345678", "qwerty", "abc123",
-        "monkey", "letmein", "dragon", "111111", "baseball",
-        "iloveyou", "trustno1", "sunshine", "princess", "admin",
-        "welcome", "shadow", "ashley", "football", "jesus",
-        "michael", "ninja", "mustang", "password1", "123456789",
-        "adobe123", "admin123", "letmein1", "photoshop", "1234567",
-    }
-    return password.lower() not in common
+    return password.lower() not in COMMON_WEAK_PASSWORDS
 
 
 # ==================== 密钥安全 ====================
@@ -168,13 +158,12 @@ def generate_pkce_challenge() -> tuple[str, str]:
 
 def verify_pkce_challenge(verifier: str, challenge: str, method: str = "S256") -> bool:
     """验证 PKCE challenge"""
-    if method == "S256":
-        expected = base64.urlsafe_b64encode(
-            hashlib.sha256(verifier.encode()).digest()
-        ).decode("utf-8").rstrip("=")
-        return secrets.compare_digest(expected, challenge)
-    elif method == "plain":
-        return secrets.compare_digest(verifier, challenge)
+    if method != "S256":
+        return False
+    expected = base64.urlsafe_b64encode(
+        hashlib.sha256(verifier.encode()).digest()
+    ).decode("utf-8").rstrip("=")
+    return secrets.compare_digest(expected, challenge)
     return False
 
 
@@ -200,7 +189,7 @@ ALLOWED_ALGORITHMS = ["HS256"]
 
 def _get_issuer() -> str:
     """获取 JWT issuer"""
-    return _settings.public_url or "unisso"
+    return canonical_issuer(_settings)
 
 
 def access_token_expiry(now: Optional[datetime] = None) -> datetime:
@@ -238,10 +227,11 @@ def create_access_token(
         "exp": access_token_expiry(now),
         "jti": jti or generate_jti(),
         "iss": _get_issuer(),
-        "aud": client_id,
+        "aud": _get_issuer() + "/api/oauth/userinfo",
     }
 
-    return jwt.encode(payload, _settings.secret_key, algorithm="HS256")
+    private, _ = signing_material(_settings)
+    return jwt.encode(payload, private, algorithm=_settings.jwt_algorithm, headers={"kid": _settings.signing_key_id})
 
 
 def create_refresh_token(
@@ -262,10 +252,11 @@ def create_refresh_token(
         "exp": refresh_token_expiry(now),
         "jti": jti or generate_jti(),
         "iss": _get_issuer(),
-        "aud": client_id,
+        "aud": _get_issuer() + "/api/oauth/token",
     }
 
-    return jwt.encode(payload, _settings.secret_key, algorithm="HS256")
+    private, _ = signing_material(_settings)
+    return jwt.encode(payload, private, algorithm=_settings.jwt_algorithm, headers={"kid": _settings.signing_key_id})
 
 
 def create_id_token(
@@ -293,49 +284,37 @@ def create_id_token(
         # 防止覆盖标准声明
         payload.update({k: v for k, v in claims.items() if k not in payload})
 
-    return jwt.encode(payload, _settings.secret_key, algorithm="HS256")
+    private, _ = signing_material(_settings)
+    return jwt.encode(payload, private, algorithm=_settings.jwt_algorithm, headers={"kid": _settings.signing_key_id})
 
 
-def decode_token(token: str, audience: Optional[str] = None) -> Optional[Dict[str, Any]]:
-    """解码并验证 JWT token（加固版）
-
-    固定使用 HS256 算法，防止 algorithm confusion attack。
-    可选验证 audience。
-    """
+def decode_token(token: str, audience: Optional[str] = None, token_type: str = "access") -> Optional[Dict[str, Any]]:
+    """Validate signature, issuer, intended resource and token purpose together."""
     try:
-        # jose 在 token 含 aud 且未传 audience 时会强制校验失败，故仅在显式传入时启用
-        options = {
-            "verify_exp": True,
-            "verify_alg": True,
-            "verify_aud": audience is not None,
-        }
-        kwargs = {"algorithms": ["HS256"], "options": options}
-        if audience:
-            kwargs["audience"] = audience
-        return jwt.decode(token, _settings.secret_key, **kwargs)
-    except jwt.ExpiredSignatureError:
-        return None
-    except jwt.InvalidTokenError:
-        return None
-    except Exception:
+        if token_type not in ("access", "refresh", "id"):
+            return None
+        if token_type == "id" and not audience:
+            return None
+        expected = audience or _get_issuer() + ("/api/oauth/token" if token_type == "refresh" else "/api/oauth/userinfo")
+        _, public = signing_material(_settings)
+        header = jwt.get_unverified_header(token)
+        if header.get("kid") != _settings.signing_key_id:
+            return None
+        payload = jwt.decode(token, public, algorithms=[_settings.jwt_algorithm],
+            issuer=_get_issuer(), audience=expected,
+            options={"require": ["exp", "iat", "iss", "aud", "sub", "jti", "type"]})
+        if payload.get("type") != token_type or not payload.get("jti") or not payload.get("sub"):
+            return None
+        if token_type != "id" and not payload.get("client_id"):
+            return None
+        return payload
+    except (jwt.InvalidTokenError, ValueError, TypeError):
         return None
 
 
 def get_token_expiry(token: str) -> Optional[datetime]:
-    """获取 token 过期时间"""
-    try:
-        payload = jwt.decode(
-            token,
-            _settings.secret_key,
-            algorithms=["HS256"],
-            options={"verify_exp": False},
-        )
-        exp = payload.get("exp")
-        if exp:
-            return datetime.fromtimestamp(exp, tz=timezone.utc)
-    except Exception:
-        pass
-    return None
+    payload = decode_token(token) or decode_token(token, token_type="refresh")
+    return datetime.fromtimestamp(payload["exp"], timezone.utc) if payload else None
 
 
 # ==================== Scope 工具 ====================

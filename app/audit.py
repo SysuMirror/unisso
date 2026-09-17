@@ -18,8 +18,6 @@ _settings = get_settings()
 AUDIT_LOG_DIR = os.environ.get("AUDIT_LOG_DIR", "logs")
 AUDIT_LOG_FILE = os.path.join(AUDIT_LOG_DIR, "audit.log")
 
-# 确保日志目录存在
-os.makedirs(AUDIT_LOG_DIR, exist_ok=True)
 
 
 @dataclass
@@ -44,10 +42,7 @@ def _sanitize_details(details: Dict[str, Any]) -> Dict[str, Any]:
     result = {}
     for k, v in details.items():
         if k in SENSITIVE_KEYS:
-            if isinstance(v, str) and len(v) > 8:
-                result[k] = v[:4] + "****" + v[-4:]
-            else:
-                result[k] = "****"
+            result[k] = "<redacted>"
         else:
             result[k] = v
     return result
@@ -77,6 +72,7 @@ def log_audit(
 
         line = json.dumps(asdict(event), ensure_ascii=False, default=str)
 
+        os.makedirs(AUDIT_LOG_DIR, exist_ok=True)
         with open(AUDIT_LOG_FILE, "a", encoding="utf-8") as f:
             f.write(line + "\n")
             f.flush()

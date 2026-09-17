@@ -86,7 +86,7 @@
                                     详情
                                 </button>
                                 <button class="btn btn-danger btn-sm"
-                                    onclick="deleteApp('{{ app.id }}', '{{ app.name }}')">
+                                    data-name="{{ app.name }}" onclick="deleteApp('{{ app.id }}', this.dataset.name)">
                                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                                         stroke-width="2">
                                         <line x1="18" y1="6" x2="6" y2="18" />
@@ -203,7 +203,7 @@
         };
 
         try {
-            const res = await fetch('{{ root_path }}/api/apps', {
+            const res = await fetch('{{ root_path }}api/apps', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(data),
@@ -231,28 +231,17 @@
                 return;
             }
 
-            document.getElementById('appDetailContent').innerHTML = `
-            <div class="form-group">
-                <label class="form-label">应用名称</label>
-                <input type="text" class="form-input" value="${app.name}" readonly>
-            </div>
-            <div class="form-group">
-                <label class="form-label">Client ID</label>
-                <input type="text" class="form-input" value="${app.client_id}" readonly>
-            </div>
-            <div class="form-group">
-                <label class="form-label">回调地址</label>
-                <textarea class="form-input" rows="2" readonly>${app.redirect_uris.join('\n')}</textarea>
-            </div>
-            <div class="form-group">
-                <label class="form-label">Scopes</label>
-                <div>${app.allowed_scopes.map(s => \`<span class="scope-tag">\${s}</span>\`).join('')}</div>
-            </div>
-            <div class="flex gap-3 justify-end">
-                <button class="btn btn-secondary" onclick="resetSecret('${app.id}')">重置 Secret</button>
-                <button class="btn btn-secondary" onclick="closeModal('appDetailModal')">关闭</button>
-            </div>
-        `;
+            const target = document.getElementById('appDetailContent');
+            target.replaceChildren();
+            for (const [label, value] of [['应用名称', app.name], ['Client ID', app.client_id], ['回调地址', app.redirect_uris.join('\n')], ['Scopes', app.allowed_scopes.join(' ')]]) {
+                const group = document.createElement('div'); group.className = 'form-group';
+                const title = document.createElement('label'); title.textContent = label; title.className = 'form-label';
+                const field = document.createElement('textarea'); field.className = 'form-input'; field.readOnly = true; field.value = value;
+                group.append(title, field); target.append(group);
+            }
+            const reset = document.createElement('button'); reset.className='btn btn-secondary'; reset.textContent='重置 Secret'; reset.onclick=()=>resetSecret(app.id);
+            const close = document.createElement('button'); close.className='btn btn-secondary'; close.textContent='关闭'; close.onclick=()=>closeModal('appDetailModal');
+            target.append(reset, close);
             openModal('appDetailModal');
         } catch (err) {
             alert('请求失败: ' + err.message);

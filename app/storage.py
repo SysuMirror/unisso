@@ -6,6 +6,8 @@
 """
 import io
 import uuid
+from datetime import timedelta
+from starlette.concurrency import run_in_threadpool
 from typing import Optional, BinaryIO
 
 from minio import Minio
@@ -52,7 +54,7 @@ def get_bucket_name() -> Optional[str]:
     return _settings.minio_bucket
 
 
-async def upload_file(
+def _upload_file(
     data: bytes,
     filename: str,
     content_type: str = "application/octet-stream",
@@ -85,7 +87,7 @@ async def upload_file(
         return None
 
 
-async def get_file_url(object_name: str, expires: int = 3600) -> Optional[str]:
+def _get_file_url(object_name: str, expires: int = 3600) -> Optional[str]:
     """获取文件临时访问 URL"""
     client = get_minio_client()
     bucket = get_bucket_name()
@@ -93,13 +95,13 @@ async def get_file_url(object_name: str, expires: int = 3600) -> Optional[str]:
         return None
 
     try:
-        url = client.presigned_get_object(bucket, object_name, expires=expires)
+        url = client.presigned_get_object(bucket, object_name, expires=timedelta(seconds=expires))
         return url
     except Exception:
         return None
 
 
-async def delete_file(object_name: str) -> bool:
+def _delete_file(object_name: str) -> bool:
     """删除文件"""
     client = get_minio_client()
     bucket = get_bucket_name()
@@ -125,3 +127,13 @@ async def list_files(prefix: str = "unisso/") -> list:
         return [{"name": obj.object_name, "size": obj.size} for obj in objects]
     except Exception:
         return []
+
+
+async def upload_file(*args, **kwargs):
+    return await run_in_threadpool(_upload_file, *args, **kwargs)
+
+async def get_file_url(*args, **kwargs):
+    return await run_in_threadpool(_get_file_url, *args, **kwargs)
+
+async def delete_file(*args, **kwargs):
+    return await run_in_threadpool(_delete_file, *args, **kwargs)

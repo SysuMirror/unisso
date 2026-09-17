@@ -85,7 +85,7 @@
                 </div>
                 <p class="text-sm text-secondary">绑定集市账号或其他外部身份，方便快速登录和授权</p>
             </div>
-            <button class="btn btn-primary btn-sm" onclick="openModal('bindIdentityModal')">
+            <button class="btn btn-primary btn-sm" disabled title="身份验证接入尚未配置">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <line x1="12" y1="5" x2="12" y2="19"/>
                     <line x1="5" y1="12" x2="19" y2="12"/>
@@ -121,7 +121,7 @@
                             {{ identity.created_at.strftime('%Y-%m-%d %H:%M') }}
                         </td>
                         <td>
-                            <button class="btn btn-danger btn-sm" onclick="unbindIdentity('{{ identity.id }}', '{{ identity.provider }}')">
+                            <button class="btn btn-danger btn-sm" data-provider="{{ identity.provider }}" onclick="unbindIdentity('{{ identity.id }}', this.dataset.provider)">
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display: inline; vertical-align: middle;">
                                     <line x1="18" y1="6" x2="6" y2="18"/>
                                     <line x1="6" y1="6" x2="18" y2="18"/>
@@ -235,7 +235,7 @@ async function bindIdentity(e) {
     };
 
     try {
-        const res = await fetch('{{ root_path }}/api/identities', {
+        const res = await fetch('{{ root_path }}api/identities', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data),
@@ -278,11 +278,11 @@ async function uploadAvatar(input) {
     const form = new FormData();
     form.append('file', file);
     try {
-        const res = await fetch('{{ root_path }}/api/me/avatar', { method: 'POST', body: form });
+        const res = await fetch('{{ root_path }}api/me/avatar', { method: 'POST', body: form });
         const result = await res.json();
         if (res.ok && result.url) {
             const preview = document.getElementById('avatarPreview');
-            preview.innerHTML = `<img src="${result.url}" style="width:100%;height:100%;object-fit:cover;">`;
+            const image = document.createElement('img'); image.src = result.url; image.style.cssText='width:100%;height:100%;object-fit:cover'; preview.replaceChildren(image);
         } else {
             alert('上传失败: ' + (result.detail || result.reason || '未知错误'));
         }
@@ -294,11 +294,11 @@ async function uploadAvatar(input) {
 // 页面加载时尝试获取头像
 (async function() {
     try {
-        const res = await fetch('{{ root_path }}/api/me/avatar');
+        const res = await fetch('{{ root_path }}api/me/avatar');
         const result = await res.json();
         if (result.ok && result.url) {
             const preview = document.getElementById('avatarPreview');
-            preview.innerHTML = `<img src="${result.url}" style="width:100%;height:100%;object-fit:cover;">`;
+            const image = document.createElement('img'); image.src = result.url; image.style.cssText='width:100%;height:100%;object-fit:cover'; preview.replaceChildren(image);
         }
     } catch (e) {}
 })();

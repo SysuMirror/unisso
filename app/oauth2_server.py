@@ -11,6 +11,7 @@
 - 审计日志集成
 """
 import uuid
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Dict, Any
 
@@ -53,6 +54,7 @@ async def create_authorization_code(
     code_challenge: Optional[str] = None,
     code_challenge_method: Optional[str] = None,
     state: Optional[str] = None,
+    nonce: Optional[str] = None,
 ) -> str:
     """创建授权码，存储到 Redis"""
     code = generate_authorization_code()
@@ -66,6 +68,7 @@ async def create_authorization_code(
         "code_challenge": code_challenge,
         "code_challenge_method": code_challenge_method,
         "state": state,
+        "nonce": nonce,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -80,10 +83,7 @@ async def get_authorization_code(code: str) -> Optional[Dict[str, Any]]:
 
 async def use_authorization_code(code: str) -> Optional[Dict[str, Any]]:
     """使用授权码（获取并删除，确保一次性）"""
-    data = await get_authorization_code(code)
-    if data:
-        await redis_client.delete(f"auth_code:{code}")
-    return data
+    return await redis_client.getdel_json(f"auth_code:{code}")
 
 
 # ==================== 应用验证（加固版） ====================
@@ -93,29 +93,19 @@ async def get_application_by_client_id(db: AsyncSession, client_id: str) -> Opti
     return result.scalar_one_or_none()
 
 
-def _normalize_uri(uri: str) -> str:
-    """标准化 URI（去除尾部斜杠、统一小写 scheme）"""
-    uri = uri.rstrip("/")
-    # 保持路径和查询参数的原始大小写，只统一 scheme
-    if "://" in uri:
-        scheme, rest = uri.split("://", 1)
-        uri = f"{scheme.lower()}://{rest}"
-    return uri
+async def get_active_application(db: AsyncSession, client_id: Optional[str]) -> Optional[Application]:
+    """Resolve a token's client only while its registration remains enabled."""
+    if not client_id:
+        return None
+    result = await db.execute(
+        select(Application).where(Application.client_id == client_id, Application.is_active.is_(True))
+    )
+    return result.scalar_one_or_none()
 
 
 def _strict_redirect_uri_match(requested: str, allowed_uris: List[str]) -> bool:
-    """严格匹配 redirect_uri
-
-    防止开放重定向漏洞：
-    - 不允许子路径匹配（如 https://evil.com?x=1 匹配 https://evil.com）
-    - 不允许前缀匹配
-    - 必须完全相等（去除尾部斜杠后）
-    """
-    requested_norm = _normalize_uri(requested)
-    for allowed in allowed_uris:
-        if _normalize_uri(allowed) == requested_norm:
-            return True
-    return False
+    """Registered redirect URIs are matched exactly."""
+    return requested in allowed_uris
 
 
 async def verify_client(
@@ -175,12 +165,12 @@ async def verify_client(
     return app
 
 
-def _require_pkce_if_public(app: Application, code_challenge: Optional[str]) -> None:
-    """公开客户端强制 PKCE"""
-    if not app.is_confidential and not code_challenge:
+def _require_pkce(code_challenge: Optional[str], code_challenge_method: Optional[str]) -> None:
+    """Every authorization-code flow uses the stronger S256 contract."""
+    if not code_challenge or code_challenge_method != "S256" or not re.fullmatch(r"[A-Za-z0-9_-]{43}", code_challenge):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="invalid_request: 公开客户端必须携带 PKCE code_challenge",
+            detail="invalid_request: S256 PKCE code_challenge required",
         )
 
 
@@ -405,7 +395,7 @@ async def issue_tokens(
 # ==================== Token 验证（Introspection） ====================
 
 async def introspect_token(token: str, db: AsyncSession) -> IntrospectResponse:
-    payload = decode_token(token)
+    payload = decode_token(token) or decode_token(token, token_type="refresh")
     if not payload:
         return IntrospectResponse(active=False)
 
@@ -422,13 +412,17 @@ async def introspect_token(token: str, db: AsyncSession) -> IntrospectResponse:
     if await is_token_revoked(db, payload.get("jti", ""), token_type):
         return IntrospectResponse(active=False)
 
+    if not await get_active_application(db, payload.get("client_id")):
+        return IntrospectResponse(active=False)
+
     user_id = payload.get("sub")
     username = None
     if user_id:
         user = await db.execute(select(User).where(User.id == user_id))
         user = user.scalar_one_or_none()
-        if user:
-            username = user.username
+        if not user or not user.is_active:
+            return IntrospectResponse(active=False)
+        username = user.username
 
     return IntrospectResponse(
         active=True,
@@ -469,6 +463,12 @@ async def get_userinfo_from_token(db: AsyncSession, token: str) -> UserInfo:
             detail="token_revoked",
         )
 
+    if not await get_active_application(db, payload.get("client_id")):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="invalid_client",
+        )
+
     from app.auth import get_user_by_id
     user = await get_user_by_id(db, payload["sub"])
     if not user or not user.is_active:
@@ -505,8 +505,7 @@ async def handle_authorize(
             detail="unsupported_response_type",
         )
 
-    # 公开客户端强制 PKCE
-    _require_pkce_if_public(app, req.code_challenge)
+    _require_pkce(req.code_challenge, req.code_challenge_method)
 
     # 计算 requested ∩ 应用白名单
     requested_scopes = scopes_to_list(req.scope)
@@ -530,6 +529,7 @@ async def handle_authorize(
                 code_challenge=req.code_challenge,
                 code_challenge_method=req.code_challenge_method,
                 state=req.state,
+                nonce=req.nonce,
             )
             log_authorize(user.id, client_ip, req.client_id, candidate_scopes, success=True, auto_approved=True)
             return {"auto_approved": True, "code": code, "state": req.state}
@@ -556,12 +556,10 @@ async def issue_code_for_consent(
     - approved_scopes 已被 routes 层限制在应用白名单内
     - 保存后复用 Redis 的 state 防重放（one-time）
     """
-    app = await get_application_by_client_id(db, req.client_id)
-    if not app:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="invalid_client",
-        )
+    app = await verify_client(db, req.client_id, redirect_uri=req.redirect_uri)
+    _require_pkce(req.code_challenge, req.code_challenge_method)
+    if not set(approved_scopes) <= set(expand_legacy_scopes(scopes_to_list(req.scope))):
+        raise HTTPException(status_code=400, detail="invalid_scope")
 
     # 三层交集最终确定生效 scope
     effective_scopes = compute_effective_scopes(approved_scopes, app.allowed_scopes)
@@ -582,6 +580,7 @@ async def issue_code_for_consent(
         code_challenge=req.code_challenge,
         code_challenge_method=req.code_challenge_method,
         state=req.state,
+        nonce=req.nonce,
     )
     log_authorize(user.id, client_ip, req.client_id, effective_scopes, success=True, auto_approved=False)
     return code
@@ -626,6 +625,9 @@ async def _handle_authorization_code_grant(
             detail="invalid_grant",
         )
 
+    if req.client_id != code_data["client_id"]:
+        raise HTTPException(status_code=400, detail="invalid_grant")
+
     # 验证客户端（token 端点，强制密钥校验）
     app = await verify_client(
         db,
@@ -642,27 +644,20 @@ async def _handle_authorization_code_grant(
             detail="invalid_grant",
         )
 
-    # 验证 PKCE（如果授权时提供了 challenge）
-    if code_data.get("code_challenge"):
-        if not req.code_verifier:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="invalid_request: code_verifier required",
-            )
-        if not verify_pkce_challenge(
-            req.code_verifier,
-            code_data["code_challenge"],
-            code_data.get("code_challenge_method", "S256"),
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="invalid_grant: pkce verification failed",
-            )
-    elif _settings.pkce_required:
-        # 如果配置要求 PKCE 但授权时没提供
+    if not code_data.get("code_challenge") or code_data.get("code_challenge_method") != "S256":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="invalid_request: pkce required",
+        )
+    if not req.code_verifier:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="invalid_request: code_verifier required",
+        )
+    if not verify_pkce_challenge(req.code_verifier, code_data["code_challenge"], "S256"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="invalid_grant: pkce verification failed",
         )
 
     # 获取用户
@@ -678,7 +673,7 @@ async def _handle_authorization_code_grant(
     granted_scopes = scopes_to_list(code_data.get("scope", ""))
     log_token_issue(user.id, client_ip, code_data["client_id"], "authorization_code", success=True)
     return await issue_tokens(
-        db, user, app, granted_scopes, include_id_token=True,
+        db, user, app, granted_scopes, include_id_token=True, nonce=code_data.get("nonce"),
     )
 
 
@@ -694,7 +689,7 @@ async def _handle_refresh_token_grant(
             detail="invalid_request",
         )
 
-    payload = decode_token(req.refresh_token)
+    payload = decode_token(req.refresh_token, token_type="refresh")
     if not payload or payload.get("type") != "refresh":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -709,6 +704,8 @@ async def _handle_refresh_token_grant(
         )
 
     client_id = payload.get("client_id")
+    if req.client_id != client_id:
+        raise HTTPException(status_code=400, detail="invalid_grant")
     app = await verify_client(db, client_id, client_secret=req.client_secret, authenticate_secret=True)
 
     from app.auth import get_user_by_id
@@ -719,7 +716,11 @@ async def _handle_refresh_token_grant(
             detail="invalid_grant",
         )
 
-    original_scope = payload.get("scope", "")
+    consent = await get_user_consent(db, user.id, app.id)
+    if not consent:
+        raise HTTPException(status_code=400, detail="invalid_grant")
+    original_scope = list_to_scopes(compute_effective_scopes(
+        scopes_to_list(payload.get("scope", "")), app.allowed_scopes, consent.scopes))
     if req.scope:
         requested = set(scopes_to_list(req.scope))
         original = set(scopes_to_list(original_scope))
@@ -733,11 +734,17 @@ async def _handle_refresh_token_grant(
         scope = original_scope
 
     # 轮换：撤销旧 refresh token 后签发全新 token 对
-    await db.execute(
+    consumed = await db.execute(
         update(RefreshTokenModel)
-        .where(RefreshTokenModel.token == payload.get("jti"))
+        .where(RefreshTokenModel.token == payload.get("jti"),
+               RefreshTokenModel.revoked == False,
+               RefreshTokenModel.user_id == user.id,
+               RefreshTokenModel.client_id == client_id)
         .values(revoked=True)
     )
+
+    if consumed.rowcount != 1:
+        raise HTTPException(status_code=400, detail="invalid_grant")
 
     log_token_issue(user.id, client_ip, client_id, "refresh_token", success=True)
     return await issue_tokens(db, user, app, scopes_to_list(scope))

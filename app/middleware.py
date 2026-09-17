@@ -48,16 +48,35 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
         # 内容安全策略 (CSP)
         # 只允许同源的脚本、样式、图片等
+        # UNISSO_CSP_ORIGINS: 逗号分隔的额外 origin，加入 form-action / connect-src
+        # 解决反代场景下页面 origin 与公网 URL 不一致导致 CSP 拦截表单提交
+        _extra_origins = []
+        from urllib.parse import urlparse
+        for _url in os.environ.get("UNISSO_CSP_ORIGINS", "").split(","):
+            _url = _url.strip()
+            if _url:
+                _parsed = urlparse(_url)
+                if _parsed.scheme and _parsed.netloc:
+                    _origin = f"{_parsed.scheme}://{_parsed.netloc}"
+                    if _origin not in _extra_origins:
+                        _extra_origins.append(_origin)
+
+        _form_action = "'self'"
+        _connect_src = "'self'"
+        if _extra_origins:
+            _form_action = "'self' " + " ".join(_extra_origins)
+            _connect_src = "'self' " + " ".join(_extra_origins)
+
         csp = (
             "default-src 'self'; "
             "script-src 'self' 'unsafe-inline'; "  # 允许内联脚本（我们的简单 JS）
             "style-src 'self' 'unsafe-inline'; "
             "img-src 'self' data: blob:; "
             "font-src 'self'; "
-            "connect-src 'self'; "
+            f"connect-src {_connect_src}; "
             "frame-ancestors 'none'; "
             "base-uri 'self'; "
-            "form-action 'self';"
+            f"form-action {_form_action};"
         )
         response.headers["Content-Security-Policy"] = csp
 
@@ -98,22 +117,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self._requests: dict = defaultdict(lambda: defaultdict(list))
 
     def _get_client_ip(self, request: Request) -> str:
-        """获取真实客户端 IP"""
-        # 优先从 X-Forwarded-For 获取（平台代理场景）
-        forwarded = request.headers.get("x-forwarded-for")
-        if forwarded:
-            # 取第一个（最原始的客户端 IP）
-            return forwarded.split(",")[0].strip()
-
-        real_ip = request.headers.get("x-real-ip")
-        if real_ip:
-            return real_ip.strip()
-
-        # 直接连接
-        if request.client:
-            return request.client.host
-
-        return "unknown"
+        from app.request_security import get_client_ip
+        return get_client_ip(request)
 
     def _is_internal_ip(self, ip: str) -> bool:
         """检查是否为内网 IP（豁免限流）"""
@@ -143,11 +148,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         client_ip = self._get_client_ip(request)
-        path = request.url.path
-
-        # 内网 IP 豁免
-        if self._is_internal_ip(client_ip):
-            return await call_next(request)
+        from app.request_security import application_path
+        path = application_path(request)
 
         # 检查敏感端点
         for endpoint, (window, limit) in self.SENSITIVE_ENDPOINTS.items():
@@ -186,15 +188,12 @@ class TrustedHostMiddleware(BaseHTTPMiddleware):
     """生产环境验证 Host 头，防止 Host 头攻击"""
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
-        if not _settings.debug:
-            host = request.headers.get("host", "")
-            # 简单检查：不允许空 Host，不允许非标准端口格式异常
-            if not host or "/" in host or "\\" in host:
-                from fastapi.responses import JSONResponse
-                return JSONResponse(
-                    status_code=400,
-                    content={"error": "invalid_host"},
-                )
+        from urllib.parse import urlsplit
+        host = request.url.hostname or ""
+        configured = _settings.allowed_hosts or [urlsplit(_settings.issuer or _settings.public_url or "").hostname]
+        if not _settings.debug and host not in configured:
+            from fastapi.responses import JSONResponse
+            return JSONResponse({"error": "invalid_host"}, status_code=400)
         return await call_next(request)
 
 
@@ -248,42 +247,10 @@ class HttpsDetectionMiddleware(BaseHTTPMiddleware):
         return response
 
     def _is_https_request(self, request: Request) -> bool:
-        """判断当前请求是否通过 HTTPS"""
-        # 1. 直接 HTTPS 连接
-        if request.url.scheme == "https":
-            return True
-
-        # 2. 信任反向代理头
-        if _settings.trust_proxy:
-            forwarded_proto = request.headers.get("x-forwarded-proto", "")
-            if forwarded_proto.lower() == "https":
-                return True
-
-            forwarded_ssl = request.headers.get("x-forwarded-ssl", "")
-            if forwarded_ssl.lower() == "on":
-                return True
-
-            # Cloudflare 特定头
-            cf_visitor = request.headers.get("cf-visitor", "")
-            if "https" in cf_visitor.lower():
-                return True
-
-        return False
+        from app.request_security import is_request_https as secure_request
+        return secure_request(request)
 
 
 def is_request_https(request: Request) -> bool:
-    """判断请求是否通过 HTTPS（供路由处理函数使用）"""
-    # 优先使用中间件检测的结果
-    if hasattr(request.state, "is_https"):
-        return request.state.is_https
-
-    # 回退：自行检测
-    if request.url.scheme == "https":
-        return True
-
-    if _settings.trust_proxy:
-        forwarded_proto = request.headers.get("x-forwarded-proto", "")
-        if forwarded_proto.lower() == "https":
-            return True
-
-    return False
+    from app.request_security import is_request_https as secure_request
+    return secure_request(request)

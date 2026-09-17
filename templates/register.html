@@ -4,6 +4,7 @@
 
 {% block content %}
 <div class="fade-in" style="max-width: 440px; margin: 3rem auto;">
+{% if registration_available %}
     <div class="card" style="padding: 2.5rem;">
         <div class="text-center mb-6">
             <div class="logo-icon mx-auto mb-4" style="width: 56px; height: 56px; border-radius: var(--radius-lg);">
@@ -15,7 +16,7 @@
                 </svg>
             </div>
             <h2 class="text-2xl font-bold mb-2">创建账号</h2>
-            <p class="text-secondary text-sm">使用中山大学邮箱注册 UniSSO</p>
+            <p class="text-secondary text-sm">使用任意有效邮箱注册 UniSSO</p>
         </div>
 
         {% if error %}
@@ -25,10 +26,12 @@
                 <line x1="12" y1="8" x2="12" y2="12"/>
                 <line x1="12" y1="16" x2="12.01" y2="16"/>
             </svg>
-            {% if error == 'email_exists' %}
-                该邮箱已注册，请直接登录
-            {% elif error == 'invalid_email' %}
-                必须使用中山大学邮箱: *.mail*.sysu.edu.cn
+            {% if error == 'invalid_input' %}
+                请检查邮箱、密码和显示信息。
+            {% elif error == 'rate_limited' %}
+                操作过于频繁，请稍后再试。
+            {% elif error == 'email_unavailable' %}
+                邮箱验证服务暂时不可用，请稍后重试。
             {% else %}
                 {{ error }}
             {% endif %}
@@ -37,31 +40,29 @@
 
         <form action="{{ root_path }}api/auth/register" method="post">
             <div class="form-group">
-                <label class="form-label">中大邮箱 <span class="text-muted text-xs">* 必填</span></label>
+                <label class="form-label">邮箱 <span class="text-muted text-xs">* 必填</span></label>
                 <div class="form-input-group">
                     <svg class="form-input-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
                         <polyline points="22,6 12,13 2,6"/>
                     </svg>
-                    <input type="email" name="email" class="form-input with-icon" required
-                           placeholder="xxx@mail2.sysu.edu.cn"
-                           pattern="[a-zA-Z0-9._%+\-]+@mail\d*\.sysu\.edu\.cn"
-                           title="必须使用中山大学邮箱: *.mail*.sysu.edu.cn"
-                           autofocus>
+                    <input type="email" name="email" class="form-input with-icon" required maxlength="128"
+                           placeholder="you@example.com" autocomplete="email" autofocus>
                 </div>
-                <p class="text-xs text-muted mt-2">仅支持 *.mail*.sysu.edu.cn 邮箱</p>
+                <p class="text-xs text-muted mt-2">我们会发送一次性验证码确认这个邮箱归你所有。</p>
             </div>
 
             <div class="form-group">
-                <label class="form-label">密码 <span class="text-muted text-xs">* 至少6个字符</span></label>
+                <label class="form-label">密码 <span class="text-muted text-xs">* 必填</span></label>
                 <div class="form-input-group">
                     <svg class="form-input-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
                         <path d="M7 11V7a5 5 0 0110 0v4"/>
                     </svg>
-                    <input type="password" name="password" class="form-input with-icon" required minlength="6"
-                           placeholder="设置登录密码">
+                    <input type="password" name="password" class="form-input with-icon" required minlength="8"
+                           maxlength="128" autocomplete="new-password" placeholder="设置登录密码">
                 </div>
+                <p class="text-xs text-muted mt-2">至少 8 位，需包含大小写字母、数字、符号中的至少两类。</p>
             </div>
 
             <div class="form-group">
@@ -108,7 +109,14 @@
                 <a href="{{ root_path }}login" class="link">立即登录</a>
             </p>
         </div>
+        </div>
+{% else %}
+    <div class="card" style="padding: 2.5rem;">
+        <h2 class="text-2xl font-bold mb-2">暂未开放自主注册</h2>
+        <p class="text-secondary text-sm">邮箱验证服务尚未配置。已有账号可继续登录。</p>
+        <a class="btn btn-primary w-full" href="{{ root_path }}login">去登录</a>
     </div>
+{% endif %}
 
     <p class="text-center text-xs text-muted mt-6">
         注册即表示您同意 UniSSO 服务条款与隐私政策

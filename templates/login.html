@@ -14,7 +14,7 @@
                 </svg>
             </div>
             <h2 class="text-2xl font-bold mb-2">欢迎回来</h2>
-            <p class="text-secondary text-sm">使用中山大学邮箱登录 UniSSO</p>
+            <p class="text-secondary text-sm">使用邮箱登录 UniSSO</p>
         </div>
 
         {% if error %}
@@ -38,16 +38,14 @@
             <input type="hidden" name="next" value="{{ next }}">
 
             <div class="form-group">
-                <label class="form-label">中大邮箱</label>
+                <label class="form-label">邮箱</label>
                 <div class="form-input-group">
                     <svg class="form-input-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
                         <polyline points="22,6 12,13 2,6"/>
                     </svg>
                     <input type="email" name="email" class="form-input with-icon" required
-                           placeholder="xxx@mail2.sysu.edu.cn" autofocus
-                           pattern="[a-zA-Z0-9._%+\-]+@mail\d*\.sysu\.edu\.cn"
-                           title="必须使用中山大学邮箱: *.mail*.sysu.edu.cn">
+                           placeholder="you@example.com" autofocus>
                 </div>
             </div>
 

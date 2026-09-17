@@ -9,6 +9,7 @@
 - 审计日志集成
 """
 import uuid
+import urllib.parse
 import re
 from datetime import datetime, timezone
 from typing import Optional, List
@@ -24,7 +25,7 @@ from app.models import User, Role, Permission, UserIdentity
 from app.schemas import UserCreate, UserLogin, UserUpdate, UserIdentityCreate
 from app.security import (
     verify_password, hash_password, decode_token,
-    validate_password_strength, generate_csrf_token, verify_csrf_token,
+    validate_password_strength,
 )
 from app.redis_client import redis_client
 from app.config import get_settings
@@ -53,19 +54,19 @@ def is_sysu_email(email: str) -> bool:
 # ==================== 用户 CRUD ====================
 
 async def get_user_by_email(db: AsyncSession, email: str) -> Optional[User]:
-    result = await db.execute(select(User).where(User.email == email))
+    result = await db.execute(select(User).options(selectinload(User.roles).selectinload(Role.permissions), selectinload(User.identities)).where(User.email == email))
     return result.scalar_one_or_none()
 
 
 async def get_user_by_username(db: AsyncSession, username: str) -> Optional[User]:
-    result = await db.execute(select(User).where(User.username == username))
+    result = await db.execute(select(User).options(selectinload(User.roles).selectinload(Role.permissions), selectinload(User.identities)).where(User.username == username))
     return result.scalar_one_or_none()
 
 
 async def get_user_by_id(db: AsyncSession, user_id: str) -> Optional[User]:
     result = await db.execute(
         select(User)
-        .options(selectinload(User.roles), selectinload(User.identities))
+        .options(selectinload(User.roles).selectinload(Role.permissions), selectinload(User.identities))
         .where(User.id == user_id)
     )
     return result.scalar_one_or_none()
@@ -84,11 +85,37 @@ async def create_user(db: AsyncSession, user_data: UserCreate, is_admin: bool = 
         full_name=user_data.full_name,
         email_verified=False,
         is_admin=is_admin,
+        roles=[], identities=[],
     )
     db.add(user)
     await db.flush()
     await db.refresh(user)
-    return user
+    return await get_user_by_id(db, user.id)
+
+
+async def create_verified_user_with_password_hash(
+    db: AsyncSession,
+    email: str,
+    password_hash: str,
+    username: Optional[str] = None,
+    full_name: Optional[str] = None,
+) -> User:
+    """Create an account after email ownership has already been proven."""
+    user = User(
+        id=str(uuid.uuid4()),
+        email=email,
+        password_hash=password_hash,
+        username=username,
+        full_name=full_name,
+        email_verified=True,
+        is_admin=False,
+        roles=[],
+        identities=[],
+    )
+    db.add(user)
+    await db.flush()
+    await db.refresh(user)
+    return await get_user_by_id(db, user.id)
 
 
 async def update_user(db: AsyncSession, user: User, data: UserUpdate) -> User:
@@ -104,11 +131,12 @@ async def update_user(db: AsyncSession, user: User, data: UserUpdate) -> User:
         user.is_active = data.is_active
     await db.flush()
     await db.refresh(user)
-    return user
+    return await get_user_by_id(db, user.id)
 
 
 async def authenticate_user(db: AsyncSession, email: str, password: str) -> Optional[User]:
     """用邮箱+密码认证用户"""
+    email = (email or "").strip().lower()
     user = await get_user_by_email(db, email)
     if not user:
         return None
@@ -121,12 +149,18 @@ async def authenticate_user(db: AsyncSession, email: str, password: str) -> Opti
 
 # ==================== 登录失败限制 ====================
 
-async def check_login_attempts(client_ip: str) -> tuple[bool, int]:
+def _attempts_key(client_ip: str, email: Optional[str] = None) -> str:
+    # 代理场景下所有用户共享同一出口 IP，仅按 IP 限流会互相连坐；
+    # 加入 email 后每个账号独立计数。
+    return f"login_attempts:{client_ip}:{(email or '').strip().lower() or '-'}"
+
+
+async def check_login_attempts(client_ip: str, email: Optional[str] = None) -> tuple[bool, int]:
     """检查登录尝试次数，返回 (是否允许, 剩余秒数)
 
     5 分钟内失败 5 次则锁定 15 分钟。
     """
-    key = f"login_attempts:{client_ip}"
+    key = _attempts_key(client_ip, email)
     attempts = await redis_client.get_json(key) or {"count": 0, "locked_until": 0}
 
     now = datetime.now(timezone.utc).timestamp()
@@ -144,9 +178,9 @@ async def check_login_attempts(client_ip: str) -> tuple[bool, int]:
     return True, 0
 
 
-async def record_login_failure(client_ip: str):
+async def record_login_failure(client_ip: str, email: Optional[str] = None):
     """记录登录失败"""
-    key = f"login_attempts:{client_ip}"
+    key = _attempts_key(client_ip, email)
     attempts = await redis_client.get_json(key) or {"count": 0, "locked_until": 0}
 
     now = datetime.now(timezone.utc).timestamp()
@@ -160,9 +194,9 @@ async def record_login_failure(client_ip: str):
     await redis_client.set_json(key, attempts, expire=900)
 
 
-async def clear_login_attempts(client_ip: str):
+async def clear_login_attempts(client_ip: str, email: Optional[str] = None):
     """清除登录失败记录（登录成功时调用）"""
-    key = f"login_attempts:{client_ip}"
+    key = _attempts_key(client_ip, email)
     await redis_client.delete(key)
 
 
@@ -201,37 +235,7 @@ async def bind_identity(
     user_id: str,
     data: UserIdentityCreate,
 ) -> UserIdentity:
-    existing = await get_user_identity(db, data.provider, data.provider_user_id)
-    if existing:
-        if existing.user_id != user_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"该 {data.provider} 账号已被其他用户绑定",
-            )
-        existing.provider_username = data.provider_username
-        existing.provider_email = data.provider_email
-        existing.provider_avatar = data.provider_avatar
-        existing.extra_data = data.extra_data
-        existing.is_active = True
-        await db.flush()
-        await db.refresh(existing)
-        return existing
-
-    identity = UserIdentity(
-        id=str(uuid.uuid4()),
-        user_id=user_id,
-        provider=data.provider,
-        provider_user_id=data.provider_user_id,
-        provider_username=data.provider_username,
-        provider_email=data.provider_email,
-        provider_avatar=data.provider_avatar,
-        extra_data=data.extra_data,
-        is_active=True,
-    )
-    db.add(identity)
-    await db.flush()
-    await db.refresh(identity)
-    return identity
+    raise HTTPException(status_code=403, detail="identity_proof_required: external identity linking is unavailable until provider verification is configured")
 
 
 async def unbind_identity(
@@ -276,6 +280,7 @@ async def get_session(session_id: str) -> Optional[dict]:
 async def delete_session(session_id: str):
     if session_id:
         await redis_client.delete(f"session:{session_id}")
+        await redis_client.delete(f"browser_csrf:session:{session_id}")
 
 
 def get_cookie_settings(request=None) -> dict:
@@ -297,33 +302,6 @@ def get_cookie_settings(request=None) -> dict:
         "path": "/",
         "max_age": _settings.session_expire_hours * 3600,
     }
-
-
-# ==================== CSRF Token 管理 ====================
-
-async def create_csrf_token(session_id: str) -> str:
-    """为 Session 创建 CSRF token"""
-    token = generate_csrf_token()
-    await redis_client.set_json(f"csrf:{session_id}", {"token": token}, expire=86400)
-    return token
-
-
-async def get_csrf_token(session_id: str) -> Optional[str]:
-    """获取 Session 的 CSRF token"""
-    if not session_id:
-        return None
-    data = await redis_client.get_json(f"csrf:{session_id}")
-    return data.get("token") if data else None
-
-
-async def validate_csrf_token(session_id: str, token: str) -> bool:
-    """验证 CSRF token"""
-    if not session_id or not token:
-        return False
-    expected = await get_csrf_token(session_id)
-    if not expected:
-        return False
-    return verify_csrf_token(token, expected)
 
 
 # ==================== 当前用户依赖 ====================
@@ -352,7 +330,7 @@ async def require_user(
     if not user:
         raise HTTPException(
             status_code=status.HTTP_307_TEMPORARY_REDIRECT,
-            headers={"Location": _auth_url("/login") + "?next=" + str(request.url.path)},
+            headers={"Location": _auth_url("/login") + "?next=" + urllib.parse.quote(str(request.url.path) + ("?" + str(request.url.query) if request.url.query else ""), safe="")},
         )
     return user
 
@@ -384,11 +362,17 @@ async def get_current_user_from_token(
             headers={"WWW-Authenticate": "Bearer"},
         )
     # 撤销检查（token 未落库或已撤销均视为无效；延迟导入避免循环依赖）
-    from app.oauth2_server import is_token_revoked
+    from app.oauth2_server import is_token_revoked, get_active_application
     if await is_token_revoked(db, payload.get("jti", ""), "access"):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="令牌已撤销",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    if not await get_active_application(db, payload.get("client_id")):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="无效的客户端",
             headers={"WWW-Authenticate": "Bearer"},
         )
     user_id = payload.get("sub")
@@ -418,37 +402,12 @@ async def require_token_user(
     return user
 
 
-async def get_current_user_mixed(
-    request: Request,
-    credentials: HTTPAuthorizationCredentials = Depends(security_bearer),
-    db: AsyncSession = Depends(get_db),
-) -> Optional[User]:
-    """混合认证：先尝试 Session Cookie，再尝试 Bearer Token"""
-    user = await get_current_user_from_session(request, db)
-    if user:
-        return user
-    if credentials:
-        return await get_current_user_from_token(credentials, db)
-    return None
-
-
 async def require_auth_user(
-    request: Request,
-    user: Optional[User] = Depends(get_current_user_mixed),
+    user: Optional[User] = Depends(get_current_user_from_session),
 ) -> User:
-    """要求登录（支持 Session 或 Bearer Token）"""
+    """Account management is a browser-session capability, not an OAuth scope."""
     if not user:
-        accept = request.headers.get("accept", "")
-        if "application/json" in accept:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="需要登录",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        raise HTTPException(
-            status_code=status.HTTP_307_TEMPORARY_REDIRECT,
-            headers={"Location": _auth_url("/login") + "?next=" + str(request.url.path)},
-        )
+        raise HTTPException(status_code=401, detail="browser_session_required")
     return user
 
 
@@ -486,7 +445,7 @@ async def require_permission(resource: str, action: str):
 
 # ==================== 初始化数据（加固版） ====================
 
-async def init_default_data(db: AsyncSession):
+async def init_default_data(db: AsyncSession, create_admin: bool = True):
     """初始化默认权限、角色和管理员（支持增量，避免重复）"""
     from sqlalchemy import select
 
@@ -531,6 +490,9 @@ async def init_default_data(db: AsyncSession):
             await db.flush()
             await db.refresh(role)
         roles_map[name] = role
+
+    if not create_admin:
+        return
 
     # 3. 检查是否已有用户（有任何用户则跳过管理员自动创建）
     user_result = await db.execute(select(User).limit(1))

@@ -6,7 +6,9 @@ import os
 from functools import lru_cache
 from typing import Optional, List
 
-from pydantic_settings import BaseSettings
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy.engine import URL
 
 
 class Settings(BaseSettings):
@@ -63,17 +65,41 @@ class Settings(BaseSettings):
     qdrant_prefix: str = os.environ.get("QDRANT_PREFIX", "")
 
     # JWT
-    jwt_algorithm: str = "HS256"
+    jwt_algorithm: str = "RS256"
+    issuer: str = ""
+    signing_private_key_file: str = ""
+    signing_public_key_file: str = ""
+    signing_key_id: str = "unisso-1"
+    redis_memory_mode: bool = False
+    trusted_proxy_cidrs: List[str] = []
+    allowed_hosts: List[str] = []
+    csrf_trusted_origins: List[str] = []
     jwt_access_token_expire_minutes: int = 60
     jwt_refresh_token_expire_days: int = 7
     jwt_id_token_expire_minutes: int = 60
 
     # OAuth2
     authorization_code_expire_seconds: int = 600
-    pkce_required: bool = True
 
     # Session
     session_expire_hours: int = 24
+
+    # Verified email registration. SMTP values are deployment-only secrets.
+    email_registration_enabled: bool = False
+    smtp_host: str = ""
+    smtp_port: int = Field(default=587, ge=1, le=65535)
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
+    smtp_from_name: str = "UniSSO"
+    smtp_starttls: bool = True
+    smtp_use_tls: bool = False
+    smtp_timeout_seconds: int = Field(default=15, ge=1, le=60)
+    registration_pending_ttl_seconds: int = Field(default=900, ge=60)
+    registration_email_hourly_limit: int = Field(default=3, ge=1)
+    registration_ip_hourly_limit: int = Field(default=10, ge=1)
+    registration_max_sends: int = Field(default=3, ge=1)
+    registration_max_attempts: int = Field(default=5, ge=1)
 
     # 共享目录（平台注入）
     shared_dir: str = os.environ.get("SHARED_DIR", "/shared")
@@ -100,7 +126,7 @@ class Settings(BaseSettings):
     root_path: str = os.environ.get("ROOT_PATH", "")
 
     # CORS
-    cors_origins: List[str] = ["*"]
+    cors_origins: List[str] = []
 
     # Gunicorn / Uvicorn 运行时配置
     workers: int = int(os.environ.get("WORKERS", "2"))
@@ -109,23 +135,41 @@ class Settings(BaseSettings):
     max_requests: int = int(os.environ.get("MAX_REQUESTS", "0"))
     timeout: int = int(os.environ.get("TIMEOUT", "120"))
 
+    @property
+    def smtp_ready(self) -> bool:
+        """A transport mode and every credential-bearing SMTP field are required."""
+        return bool(
+            self.smtp_host
+            and self.smtp_username
+            and self.smtp_password
+            and self.smtp_from
+            and (self.smtp_starttls != self.smtp_use_tls)
+        )
+
+    @property
+    def email_registration_available(self) -> bool:
+        """Registration fails closed unless separately enabled and completely configured."""
+        return self.email_registration_enabled and self.smtp_ready
+
+    model_config = SettingsConfigDict(env_prefix="UNISSO_", case_sensitive=False)
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        # 动态构建数据库 URL（如果未直接设置）
+        if self.redis_memory_mode and not self.debug:
+            raise ValueError("Memory state storage is restricted to debug mode")
         if not self.database_url:
-            has_mysql_env = bool(os.environ.get("MYSQL_HOST"))
-            has_mysql_creds = bool(os.environ.get("MYSQL_USER")) and bool(os.environ.get("MYSQL_PASSWORD"))
-            if has_mysql_env and has_mysql_creds:
-                self.database_url = (
-                    f"mysql+aiomysql://{self.mysql_user}:{self.mysql_password}"
-                    f"@{self.mysql_host}:{self.mysql_port}/{self.mysql_db}"
-                )
-            else:
+            if self.mysql_user and self.mysql_password:
+                self.database_url = URL.create(
+                    "mysql+aiomysql", username=self.mysql_user, password=self.mysql_password,
+                    host=self.mysql_host, port=self.mysql_port, database=self.mysql_db,
+                ).render_as_string(hide_password=False)
+            elif self.debug:
                 self.database_url = "sqlite+aiosqlite:///./unisso.db"
-
-    class Config:
-        env_prefix = "UNISSO_"
-        case_sensitive = False
+            else:
+                raise ValueError("Production database configuration is required")
+        if not self.debug and self.database_url.startswith("sqlite"):
+            raise ValueError("SQLite is restricted to local development")
+        self.root_path = "/" + self.root_path.strip("/") if self.root_path.strip("/") else ""
 
 
 @lru_cache()

@@ -1,19 +1,8 @@
 """UniSSO Pydantic 数据模型"""
-import re
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 
 from pydantic import BaseModel, Field, EmailStr, ConfigDict, field_validator
-
-# Sysu 邮箱正则
-SYSU_EMAIL_RE = re.compile(r"^[a-zA-Z0-9._%+-]+@mail\d*\.sysu\.edu\.cn$")
-
-
-def validate_sysu_email(email: str) -> str:
-    if not SYSU_EMAIL_RE.match(email):
-        raise ValueError(f"必须使用中山大学邮箱: *.mail*.sysu.edu.cn")
-    return email
-
 
 # ==================== 用户相关 ====================
 
@@ -24,15 +13,19 @@ class UserBase(BaseModel):
 
 
 class UserCreate(BaseModel):
-    email: str = Field(..., min_length=5, max_length=128)
-    password: str = Field(..., min_length=6, max_length=128)
-    username: Optional[str] = Field(None, max_length=64)
-    full_name: Optional[str] = None
+    email: EmailStr = Field(..., min_length=5, max_length=128)
+    password: str = Field(..., min_length=8, max_length=128)
+    username: Optional[str] = Field(None, min_length=1, max_length=64)
+    full_name: Optional[str] = Field(None, min_length=1, max_length=128)
 
     @field_validator("email")
     @classmethod
-    def check_sysu_email(cls, v):
-        return validate_sysu_email(v)
+    def normalize_email(cls, value: str) -> str:
+        return value.strip().lower()
+
+
+class RegistrationStartRequest(UserCreate):
+    pass
 
 
 class UserUpdate(BaseModel):
@@ -176,11 +169,14 @@ class ApplicationResponse(ApplicationBase):
 
     id: str
     client_id: str
-    client_secret: Optional[str] = None
     is_active: bool
     owner_id: Optional[str] = None
     created_at: datetime
     updated_at: datetime
+
+
+class ApplicationCreatedResponse(ApplicationResponse):
+    client_secret: str
 
 
 class ApplicationPublic(BaseModel):
@@ -203,6 +199,7 @@ class AuthorizeRequest(BaseModel):
     redirect_uri: str
     scope: str = "openid profile"
     state: Optional[str] = None
+    nonce: Optional[str] = None
     code_challenge: Optional[str] = None
     code_challenge_method: Optional[str] = "S256"
 

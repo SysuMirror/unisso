@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+
+{% block title %}验证邮箱 - {{ app_name }}{% endblock %}
+
+{% block content %}
+<div class="fade-in" style="max-width: 440px; margin: 3rem auto;">
+    <div class="card" style="padding: 2.5rem;">
+        <h2 class="text-2xl font-bold mb-2">验证邮箱</h2>
+        <p class="text-secondary text-sm">输入发送到邮箱的 6 位验证码。验证码 15 分钟内有效。</p>
+
+        {% if error %}
+        <div class="alert alert-danger">
+            {% if error == 'rate_limited' %}
+                操作过于频繁，请稍后再试。
+            {% elif error == 'email_unavailable' %}
+                邮件暂时发送失败，请稍后重试。
+            {% elif error == 'conflict' %}
+                无法完成验证，请重新注册或联系管理员。
+            {% else %}
+                验证码无效或已过期。
+            {% endif %}
+        </div>
+        {% endif %}
+
+        <form action="{{ root_path }}api/auth/verify-email" method="post">
+            <div class="form-group">
+                <label class="form-label">邮箱</label>
+                <input type="email" name="email" class="form-input" required maxlength="128"
+                       value="{{ pending_email }}" autocomplete="email">
+            </div>
+            <div class="form-group">
+                <label class="form-label">验证码</label>
+                <input type="text" name="code" class="form-input" required inputmode="numeric"
+                       pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code">
+            </div>
+            <button type="submit" class="btn btn-primary w-full">验证并登录</button>
+        </form>
+
+        <form action="{{ root_path }}api/auth/resend-registration" method="post" class="mt-4">
+            <input type="hidden" name="email" value="{{ pending_email }}">
+            <button type="submit" class="btn btn-secondary w-full">重新发送验证码</button>
+        </form>
+
+        <p class="text-center text-sm text-secondary mt-6">
+            <a href="{{ root_path }}login" class="link">返回登录</a>
+        </p>
+    </div>
+</div>
+{% endblock %}

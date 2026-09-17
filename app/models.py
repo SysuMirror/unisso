@@ -4,14 +4,13 @@
 可绑定：集市账号、其他应用账号（通过 UserIdentity）
 """
 import uuid
-import re
 from datetime import datetime
 from typing import Optional, List
 
 from sqlalchemy import (
     String, Boolean, DateTime, Text, Integer, ForeignKey, Table, Column, JSON
 )
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, validates
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
 
@@ -35,20 +34,16 @@ role_permissions = Table(
 )
 
 
-# Sysu 邮箱正则
-SYSU_EMAIL_RE = re.compile(r"^[a-zA-Z0-9._%+-]+@mail\d*\.sysu\.edu\.cn$")
-
-
 class User(Base):
-    """用户表 - 主身份为 sysu 邮箱
+    """用户表 - 主身份为唯一已验证邮箱
 
-    注册时必须使用 *.mail*.sysu.edu.cn 邮箱。
+    email 存储唯一且已验证的邮箱地址。
     username 为可选的显示昵称，不用于登录。
     """
     __tablename__ = "users"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    # 主身份：sysu 邮箱（唯一、必填）
+    # 主身份：唯一已验证邮箱（必填）
     email: Mapped[str] = mapped_column(String(128), unique=True, index=True, nullable=False)
     email_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -71,12 +66,6 @@ class User(Base):
     consents: Mapped[List["UserConsent"]] = relationship("UserConsent", back_populates="user", cascade="all, delete-orphan")
     owned_apps: Mapped[List["Application"]] = relationship("Application", back_populates="owner")
     identities: Mapped[List["UserIdentity"]] = relationship("UserIdentity", back_populates="user", cascade="all, delete-orphan")
-
-    @validates("email")
-    def validate_email(self, key, email):
-        if email and not SYSU_EMAIL_RE.match(email):
-            raise ValueError(f"邮箱必须是中山大学邮箱格式: *.mail*.sysu.edu.cn, 收到: {email}")
-        return email
 
     def __repr__(self) -> str:
         return f"<User {self.email}>"

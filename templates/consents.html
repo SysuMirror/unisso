@@ -51,7 +51,7 @@
                         </td>
                         <td>
                             <form action="{{ root_path }}api/consents/{{ consent.id }}" method="post"
-                                  onsubmit="return confirm('确定要撤销对 {{ consent.application.name }} 的授权吗？');"
+                                  onsubmit="return confirm('确定要撤销此应用的授权吗？');"
                                   style="display: inline;">
                                 <input type="hidden" name="_method" value="delete">
                                 <button type="submit" class="btn btn-danger btn-sm">

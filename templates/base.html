@@ -572,6 +572,7 @@
         }
     </style>
     {% block extra_css %}{% endblock %}
+    <meta name="unisso-root" content="{{ root_path }}">
 </head>
 <body>
     <div class="bg-decoration"></div>
@@ -603,7 +604,7 @@
                     </div>
                 {% else %}
                     <a href="{{ root_path }}login">登录</a>
-                    <a href="{{ root_path }}register" class="btn btn-primary btn-sm">注册</a>
+                    <a href="{{ root_path }}register">注册</a>
                 {% endif %}
             </div>
         </div>
@@ -613,6 +614,7 @@
         {% block content %}{% endblock %}
     </main>
 
+    <script src="{{ root_path }}static/browser-security.js"></script>
     {% block extra_js %}{% endblock %}
 </body>
 </html>
