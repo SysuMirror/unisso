@@ -74,7 +74,7 @@
 
 | 字段 | 值 |
 |------|-----|
-| 仓库地址 | `https://github.com/YatTerra/unisso.git` |
+| 仓库地址 | `https://github.com/SysuMirror/unisso.git` |
 | 分支 | `main` |
 | 子目录 | 留空 |
 | 类型 | 常驻服务（崩了重启） |
@@ -88,6 +88,26 @@ UNISSO_ADMIN_PASSWORD=管理员强密码
 ```
 
 4. 点「部署」
+
+### Push-to-Deploy（已接通，推荐）
+
+向 `main` 分支 push 即自动重部署，无需手动操作：
+
+```
+git push origin main
+  → GitHub webhook → https://ssemarket.cn:24000/deploy/webhook?source=github
+  → yatterra 匹配 repo+branch（auto_deploy=true）
+  → pod 内 git fetch + reset --hard origin/main → 重启 deploy 程序
+  → 健康检查通过后上报 ready（全程约 1 分钟）
+```
+
+`deploy.sh`（pod 内的运行入口）会自动完成：
+- venv 不存在则创建；`requirements.txt` 的 sha256 变化时增量安装依赖（**用阿里云 pypi 镜像**，pod 网络不通 pypi.org）
+- 设置生产 env：`UNISSO_ISSUER=https://sso.ssemarket.cn`、RS256 签名、trusted proxy、allowed hosts
+- 读取 `./secrets/signing-{private,public}.pem`（**不进仓库**，pod 内手工放置）
+- `exec .venv/bin/python start.py`
+
+> 运维/排障手册见 `.claude/skills/unisso-devops/SKILL.md`（供 AI 和人类使用的完整 runbook）。
 
 ### 环境变量
 
@@ -111,6 +131,20 @@ UNISSO_ADMIN_PASSWORD=管理员强密码
 | `TRUST_PROXY` | `true` 时信任反向代理的 HTTPS 头 |
 | `FORCE_HTTPS` | `true` 时 HTTP 请求自动 308 重定向到 HTTPS |
 | `HTTPS_CERT/HTTPS_KEY` | 自签名证书路径（应用直接监听 HTTPS 时使用） |
+| `UNISSO_ISSUER` | OIDC 规范 issuer（生产必须 HTTPS，如 `https://sso.ssemarket.cn`） |
+| `UNISSO_JWT_ALGORITHM` | 默认 `RS256`；RS256 需配 `UNISSO_SIGNING_PRIVATE_KEY_FILE`/`_PUBLIC_KEY_FILE`/`_KEY_ID` |
+| `UNISSO_ALLOWED_HOSTS` | JSON 数组，Host 头白名单（如 `["sso.ssemarket.cn"]`） |
+| `UNISSO_TRUSTED_PROXY_CIDRS` | JSON 数组，可信代理网段（X-Forwarded-For 解析用） |
+| `UNISSO_CSRF_TRUSTED_ORIGINS` | JSON 数组，CSRF 信任来源 |
+
+邮箱注册（可选，需 SMTP）：
+
+| 变量 | 说明 |
+|------|------|
+| `UNISSO_EMAIL_REGISTRATION_ENABLED` | `true` 开启邮箱验证注册 |
+| `UNISSO_SMTP_HOST/PORT/USERNAME/PASSWORD` | SMTP 服务器与凭证 |
+| `UNISSO_SMTP_FROM` / `UNISSO_SMTP_FROM_NAME` | 发件人地址/名称 |
+| `UNISSO_SMTP_USE_TLS` / `UNISSO_SMTP_STARTTLS` | 465 用 `USE_TLS=true`；587 用 `STARTTLS=true` |
 
 ### HTTPS 配置（自动）
 
