@@ -65,3 +65,4 @@ htmlcov/
 
 # Alembic 生成的迁移缓存（实际迁移文件应提交）
 # migrations/versions/__pycache__ 已由 __pycache__ 规则覆盖
+secrets/
