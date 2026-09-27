@@ -99,6 +99,51 @@ def _get_user_agent(request: Request) -> Optional[str]:
     return request.headers.get("user-agent")
 
 
+def _origin_of(url: Optional[str]) -> Optional[str]:
+    if not url:
+        return None
+    parts = urlsplit(url)
+    if parts.scheme and parts.netloc:
+        return f'{parts.scheme}://{parts.netloc}'
+    return None
+
+
+def _add_form_action_origin(request: Request, origin: Optional[str]) -> None:
+    """把 origin 加入本次响应的 CSP form-action 白名单（SecurityHeadersMiddleware 读取）。
+
+    浏览器对 form-action 的校验覆盖表单提交引发的**整条 302 跳转链**：链上只要出现
+    不在名单内的跨域 URL（典型是 client 的 redirect_uri），整次提交会被静默拦截，
+    页面表现为点按钮毫无反应。OAuth 同意页与登录页都可能把表单提交链引到 client
+    回调，因此这两处都要按需注册。
+    """
+    if not origin:
+        return
+    origins = list(getattr(request.state, 'csp_form_action_origins', None) or [])
+    if origin not in origins:
+        origins.append(origin)
+    request.state.csp_form_action_origins = origins
+
+
+async def _form_action_origin_from_next(db: AsyncSession, next_path: Optional[str]) -> Optional[str]:
+    """登录页专用：next 若指向 /authorize，其后续 302 会跳到 client 的 redirect_uri。
+
+    只有 client_id + redirect_uri 通过 verify_client（已注册、严格匹配）时才返回其 origin。
+    """
+    parts = urlsplit(next_path or '')
+    if not parts.path.rstrip('/').endswith('/authorize'):
+        return None
+    query = dict(parse_qsl(parts.query, keep_blank_values=True))
+    client_id = query.get('client_id')
+    redirect_uri = query.get('redirect_uri')
+    if not client_id or not redirect_uri:
+        return None
+    try:
+        await verify_client(db, client_id, redirect_uri=redirect_uri)
+    except Exception:
+        return None
+    return _origin_of(redirect_uri)
+
+
 # 允许的图片 MIME 类型
 ALLOWED_IMAGE_TYPES = {
     "image/jpeg", "image/png", "image/gif", "image/webp"
@@ -144,12 +189,22 @@ async def index(request: Request, user: Optional[User] = Depends(get_current_use
 
 
 @router.get("/login", response_class=HTMLResponse)
-async def login_page(request: Request, next: Optional[str] = None, error: Optional[str] = None):
+async def login_page(
+    request: Request,
+    next: Optional[str] = None,
+    error: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+):
     """登录页面"""
     from app.views import templates
+    safe_next = safe_next_url(next, _url('/'))
+    # 登录表单提交后 302 到 next；若 next 是 /authorize（且已存在 consent 时），
+    # 跳转链会继续跨域到 client 回调，需提前把该 origin 加进 form-action 白名单，
+    # 否则「登录之后没反应」。
+    _add_form_action_origin(request, await _form_action_origin_from_next(db, safe_next))
     return templates.TemplateResponse(request, "login.html", {
         "request": request,
-        "next": safe_next_url(next, _url('/')),
+        "next": safe_next,
         "error": error,
         "app_name": _settings.app_name,
     })
@@ -260,13 +315,9 @@ async def authorize_page(
     scopes = result["scopes"]
     scope_items = [{"name": s, "description": scope_description(s)} for s in scopes]
 
-    # 同意页的表单 POST 会 302 跳到 client 的 redirect_uri；浏览器校验 form-action 时
-    # 覆盖整条跳转链，跨域（如 octop.ssemarket.cn）会被静默拦截，表现为点「同意授权」
-    # 没反应。这里把已验证过的 redirect_uri 的 origin 交给 SecurityHeadersMiddleware
-    # 并入本次响应的 form-action 白名单。
-    _rp = urlsplit(redirect_uri)
-    if _rp.scheme and _rp.netloc:
-        request.state.csp_form_action_origins = [f"{_rp.scheme}://{_rp.netloc}"]
+    # 同意页表单 POST 后 302 到 client 的 redirect_uri，需放行该跨域 origin
+    # （redirect_uri 已由 handle_authorize -> verify_client 严格校验）
+    _add_form_action_origin(request, _origin_of(redirect_uri))
 
     return templates.TemplateResponse(request, "authorize.html", {
         "request": request,
