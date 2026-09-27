@@ -61,10 +61,22 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                     if _origin not in _extra_origins:
                         _extra_origins.append(_origin)
 
+        # 单次请求动态追加的 form-action origin（由路由写入 request.state）。
+        # 背景：OAuth 同意页的表单 POST /api/oauth/authorize 会 302 跳到 client 的
+        # redirect_uri，而浏览器对 form-action 的校验覆盖整条跳转链，跨域时会被拦截，
+        # 表现为点「同意授权」毫无反应。该 origin 来自 verify_client 校验通过的
+        # 已注册 redirect_uri，因此不是任意值。
+        # 只并入 form-action，不并入 connect-src（页面 JS 不需要访问这些源）。
+        _form_action_origins = list(_extra_origins)
+        for _origin in getattr(request.state, "csp_form_action_origins", None) or []:
+            if _origin and _origin not in _form_action_origins:
+                _form_action_origins.append(_origin)
+
         _form_action = "'self'"
         _connect_src = "'self'"
+        if _form_action_origins:
+            _form_action = "'self' " + " ".join(_form_action_origins)
         if _extra_origins:
-            _form_action = "'self' " + " ".join(_extra_origins)
             _connect_src = "'self' " + " ".join(_extra_origins)
 
         csp = (

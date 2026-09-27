@@ -259,6 +259,15 @@ async def authorize_page(
     app = result["application"]
     scopes = result["scopes"]
     scope_items = [{"name": s, "description": scope_description(s)} for s in scopes]
+
+    # 同意页的表单 POST 会 302 跳到 client 的 redirect_uri；浏览器校验 form-action 时
+    # 覆盖整条跳转链，跨域（如 octop.ssemarket.cn）会被静默拦截，表现为点「同意授权」
+    # 没反应。这里把已验证过的 redirect_uri 的 origin 交给 SecurityHeadersMiddleware
+    # 并入本次响应的 form-action 白名单。
+    _rp = urlsplit(redirect_uri)
+    if _rp.scheme and _rp.netloc:
+        request.state.csp_form_action_origins = [f"{_rp.scheme}://{_rp.netloc}"]
+
     return templates.TemplateResponse(request, "authorize.html", {
         "request": request,
         "user": user,
