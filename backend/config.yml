@@ -1,0 +1,84 @@
+# UniSSO v2 backend configuration
+#
+# Precedence: environment variables > config.local.yml > this file > defaults.
+# The platform injects MYSQL_* / REDIS_* / SMTP credentials at deploy time.
+# Never put real passwords in this tracked file; use config.local.yml or env.
+
+server:
+  port: 8080
+
+mysql:
+  host: mysql.platform-infra.svc.cluster.local
+  port: 3306
+  user: unisso
+  password: ""
+  database: unisso
+
+redis:
+  host: redis.platform-infra.svc.cluster.local
+  port: 6379
+  username: u2d5ad1eb0d
+  password: ""
+  prefix: gca08395e
+  db: 0
+
+jwt:
+  issuer: https://sso.ssemarket.cn
+  signing_key_id: unisso-2026-09-08
+  private_key_file: secrets/signing-private.pem
+  public_key_file: secrets/signing-public.pem
+  access_token_minutes: 60
+  refresh_token_days: 7
+  id_token_minutes: 60
+
+session:
+  hours: 24
+
+oauth:
+  authorization_code_seconds: 600
+
+smtp:
+  enabled: true
+  host: smtp.163.com
+  port: 465
+  username: ssemarket@163.com
+  password: ""
+  from: ssemarket@163.com
+  from_name: UniSSO
+  use_tls: true
+  starttls: false
+
+sse:
+  # 院子账号密码登录（sse-login.md 方案 B）。AES key 在前端 bundle 中公开。
+  enabled: true
+  api_base: https://ssemarket.cn/api
+  web_base: https://ssemarket.cn
+  aes_key: "16bit secret key"
+  cache_seconds: 604800
+
+web:
+  root: web
+  data_root: data
+
+face:
+  base_url: https://ai.ssemarket.cn/face
+  api_key_file: secrets/face-api.key
+  login_threshold: 0.6
+  bind_threshold: 0.5
+  timeout_seconds: 30
+
+security:
+  # Password logins whose last successful login is older than this many days
+  # require a second factor (email code now; face when liveness is configured).
+  step_up_days: 7
+  # Explicit "trust this device" opt-in. Trusted devices skip step-up for this
+  # many days; users can remove trust from Profile -> Login devices.
+  trust_device_days: 180
+  allowed_hosts:
+    - sso.ssemarket.cn
+    - ssemarket.cn
+  csrf_trusted_origins:
+    - https://sso.ssemarket.cn
+    - https://ssemarket.cn
+    - https://ssemarket.cn:23004
+    - https://sso.ssemarket.cn:23004

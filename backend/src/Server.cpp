@@ -1,0 +1,1319 @@
+/**
+ * @file Server.cpp
+ * @brief HTTP服务器实现文件
+ * @brief HTTP Server Implementation File
+ * 
+ * 此文件实现了基于C++的多线程HTTP服务器，支持IPv4和IPv6，
+ * 提供路由管理、请求处理、响应生成等核心功能。
+ * This file implements a multi-threaded HTTP server based on C++, supporting IPv4 and IPv6,
+ * providing core functionalities such as routing management, request handling, and response generation.
+ */
+#define CPPHTTPLIB_THREAD_POOL_COUNT 16
+#include "../include/Server.h"
+#include <httplib.h>
+namespace { httplib::Server* g_httpServer = nullptr; }
+#include "app/logger.h"
+#include "../include/DuringTask.h"
+#include "Crash.h"
+#include <iostream>
+#include <sstream>
+#include <thread>
+#include <cstring>
+#include <utility>
+#include <csignal>
+#include <iomanip>
+#include <ctime>
+#include "../include/Coroutine.h"
+
+#ifdef _WIN32
+    #include <winsock2.h>
+    #include <ws2tcpip.h>
+    #include <windows.h>
+    #ifdef _MSC_VER
+        #pragma comment(lib, "ws2_32.lib")
+    #endif
+    #define close(s) closesocket(s)
+    typedef int socklen_t;
+#else
+    #include <sys/socket.h>
+    #include <netinet/in.h>
+    #include <arpa/inet.h>
+    #include <unistd.h>
+    #include <sys/socket.h>
+    #include <netinet/in.h>
+    #include <arpa/inet.h>
+    #include <netdb.h>     // 包含 hostent、gethostbyname、addrinfo、getaddrinfo（Linux/macOS）
+    #include <unistd.h>    // 包含 close（Linux/macOS）
+#endif
+
+
+/**
+ * @brief 将map转换为JSON格式的字符串
+ * @param mp 输入的map，键值类型均为string
+ * @return 返回JSON格式的字符串
+ * @brief Convert map to JSON formatted string
+ * @param mp Input map with string key and value types
+ * @return Returns JSON formatted string
+ * @note 此辅助函数用于将字符串映射转换为简单的JSON格式
+ * @note This helper function converts string maps to simple JSON format
+ */
+std::string mpToJson(const std::map<std::string, std::string>& mp) {
+    std::string json = "{";  // 初始化JSON字符串，开始标记
+                           // Initialize JSON string with opening brace
+    // 遍历map中的每个键值对
+    // Iterate through each key-value pair in the map
+    for (const auto& pair : mp) {
+        // 将键值对添加到JSON字符串中，格式为"key":"value",
+        // Add key-value pair to JSON string in "key":"value", format
+        json += "\"" + pair.first + "\":\"" + pair.second + "\",";
+    }
+    // 如果JSON字符串不为空（即map不为空），移除最后一个多余的逗号
+    // If JSON string is not empty (map is not empty), remove the trailing comma
+    if (!json.empty()) {
+        json.pop_back(); // 移除最后一个逗号
+                       // Remove the last comma
+    }
+    json += "}";  // 添加JSON字符串的结束标记
+                 // Add JSON string closing brace
+    return json;  // 返回生成的JSON字符串
+                // Return the generated JSON string
+}
+
+// 静态成员初始化
+Server* Server::instance_ = nullptr;
+
+/**
+ * @brief 服务器构造函数
+ * @param port 服务器监听端口
+ * @param printParams 是否打印请求参数
+ * @brief Server constructor
+ * @param port Server listening port
+ * @param printParams Whether to print request parameters
+ * @note 初始化服务器实例，设置端口，创建线程池，并注册信号处理函数
+ * @note Initializes server instance, sets port, creates thread pool, and registers signal handlers
+ */
+Server::Server(int port, bool printParams) : port_(port),serverSocket_(-1), running_(false), LogParams(printParams), threadpool_(1) {
+    instance_ = this;
+    CrashHandler::instance().init([this]() { this->cleanup(); });
+    registerSignalHandlers();
+}
+
+void Server::registerSignalHandlers() {
+    // 捕获 Ctrl+C（SIGINT）和进程终止（SIGTERM）
+    signal(SIGINT, [](int sig) {
+        std::cerr << "\nReceived signal " << sig << " (Ctrl+C), exiting gracefully..." << std::endl;
+        // 通知全局 Server 实例退出（需将 Server 实例设为全局/单例）
+        if (instance_) {
+            instance_->stop(); // 退出主循环
+        }
+    });
+
+#ifdef _WIN32
+    // Windows 额外捕获 Ctrl+Break
+    signal(SIGBREAK, [](int sig) {
+        std::cerr << "\nReceived signal " << sig << " (Ctrl+Break), exiting gracefully..." << std::endl;
+        if (instance_) {
+            instance_->stop();
+        }
+    });
+#else
+    // Linux 捕获 SIGTERM（kill 命令）
+        signal(SIGTERM, [](int sig) {
+            std::cerr << "\nReceived signal " << sig << " (SIGTERM), exiting gracefully..." << std::endl;
+            if (instance_) {
+                instance_->stop();
+            }
+        });
+#endif
+}
+// 核心清理逻辑（优雅退出时执行）
+void Server::cleanup() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    std::cerr << "\n=== Server cleanup start ===" << std::endl;
+
+    // 1. 停止主循环
+    running_ = false;
+
+    // 2. 关闭Socket
+    if (serverSocket_ >= 0) {
+#ifdef _WIN32
+        closesocket(serverSocket_);
+#else
+        close(serverSocket_);
+#endif
+        serverSocket_ = -1;
+        std::cerr << "Socket closed" << std::endl;
+    }
+
+    // 3. 停止线程池/工作线程
+    // threadPool_.shutdown();
+    std::cerr << "Thread pool shutdown" << std::endl;
+
+    // 4. 释放其他资源（数据库连接、文件句柄等）
+    // dbConn_.close();
+    std::cerr << "Database connection closed" << std::endl;
+
+    std::cerr << "=== Server cleanup end ===" << std::endl;
+}
+
+Server::~Server() {
+    std::cout << "\nShutting down server..." << std::endl;
+    stop();
+}
+
+void Server::get(const std::string& path, Handler handler) {
+    addRoute("GET", path, std::move(handler), {});
+}
+
+void Server::post(const std::string& path, Handler handler) {
+    addRoute("POST", path, std::move(handler), {});
+}
+
+void Server::put(const std::string& path, Handler handler) {
+    addRoute("PUT", path, std::move(handler), {});
+}
+
+void Server::del(const std::string& path, Handler handler) {
+    addRoute("DELETE", path, std::move(handler), {});
+}
+
+void Server::get(const std::string& path, const std::vector<Middleware>& middlewares, Handler handler) {
+    addRoute("GET", path, std::move(handler), middlewares);
+}
+
+void Server::post(const std::string& path, const std::vector<Middleware>& middlewares, Handler handler) {
+    addRoute("POST", path, std::move(handler), middlewares);
+}
+
+void Server::put(const std::string& path, const std::vector<Middleware>& middlewares, Handler handler) {
+    addRoute("PUT", path, std::move(handler), middlewares);
+}
+
+void Server::del(const std::string& path, const std::vector<Middleware>& middlewares, Handler handler) {
+    addRoute("DELETE", path, std::move(handler), middlewares);
+}
+
+void Server::setNotFoundHandler(NotFoundHandler handler) {
+    notFoundHandler_ = std::move(handler);
+}
+
+void Server::use(Middleware middleware) {
+    std::lock_guard<std::mutex> lock(routesMutex_);
+    middlewares_.push_back(std::move(middleware));
+}
+
+void Server::addRoute(const std::string& method, const std::string& path, Handler handler, std::vector<Middleware> middlewares) {
+    std::lock_guard<std::mutex> lock(routesMutex_);
+    routes_[method][path] = RouteEntry{ std::move(handler), std::move(middlewares) };
+}
+
+RouterGroup Server::group(const std::string& prefix) {
+    return RouterGroup(*this, prefix, {});
+}
+
+void test(u_long i) {
+    std::cout << "test " << i << std::endl;
+}
+
+/**
+ * @brief 服务器运行函数
+ * @brief Server run function
+ * @note 初始化网络环境，创建socket，绑定地址，监听连接并处理客户端请求
+ * @note Initializes network environment, creates socket, binds address, listens for connections and handles client requests
+ * @warning 此函数会阻塞直到服务器停止
+ * @warning This function will block until the server stops
+ */
+void Server::run() {
+    printRegisteredRoutes();
+    std::cout << "Server running on port " << port_ << std::endl;
+
+    httplib::Server svr;
+    g_httpServer = &svr;
+    svr.set_keep_alive_max_count(1000);
+    svr.set_keep_alive_timeout(5);
+    svr.set_read_timeout(15, 0);
+    svr.set_write_timeout(15, 0);
+    // Face liveness uploads up to 8 PNG frames in one multipart request.
+    // 24 MiB leaves room for metadata and future frame sizes.
+    svr.set_payload_max_length(24 * 1024 * 1024);
+    svr.set_tcp_nodelay(true);
+    svr.set_keep_alive_max_count(5);
+    svr.set_keep_alive_timeout(30);
+    svr.set_read_timeout(15);
+    svr.set_write_timeout(15);
+
+    auto handler = [this](const httplib::Request& hreq, httplib::Response& hres) {
+        Request req;
+        req.method = hreq.method;
+        req.path = hreq.path;
+        req.body = hreq.body;
+        req.remoteAddr = hreq.remote_addr;
+        // cpp-httplib parses multipart into hreq.files; copy every part so
+        // repeated fields (frames) and form fields (session_token) survive.
+        for (const auto& entry : hreq.files) {
+            const auto& part = entry.second;
+            UploadedFile file;
+            file.name = entry.first;
+            file.filename = part.filename;
+            file.contentType = part.content_type;
+            file.data = part.content;
+            req.uploadedFileList.push_back(file);
+            if (!part.filename.empty()) {
+                req.uploadedFiles[entry.first] = std::move(file);
+            } else {
+                req.bodyParams[entry.first] = JsonValue(part.content);
+            }
+        }
+        for (const auto& [key, value] : hreq.headers) req.headers[key] = value;
+        for (const auto& [key, value] : hreq.params) req.queryParams[key] = value;
+        try {
+            req.parseBody();
+        } catch (...) {
+            req.bodyParseFailed = true;
+        }
+        if (req.bodyParseFailed) {
+            hres.status = 400;
+            hres.set_header("Content-Type", "application/json; charset=utf-8");
+            hres.body = "{\"error\":\"invalid_body\"}";
+            return;
+        }
+
+        Response res;
+        dispatch(req, res);
+        hres.status = res.statusCode;
+        for (const auto& [key, value] : res.headers) hres.set_header(key, value);
+        for (const auto& [key, value] : res.extraHeaders) hres.headers.emplace(key, value);
+        hres.body = res.body;
+    };
+
+    svr.Get(".*", handler);
+    svr.Post(".*", handler);
+    svr.Put(".*", handler);
+    svr.Delete(".*", handler);
+    svr.Patch(".*", handler);
+    svr.Options(".*", handler);
+
+    running_ = true;
+    if (!svr.listen("0.0.0.0", port_)) {
+        std::cerr << "Error: failed to listen on port " << port_ << std::endl;
+    }
+    running_ = false;
+    g_httpServer = nullptr;
+    std::cout << "Server stopped." << std::endl;
+}
+
+void Server::dispatch(Request& request, Response& response) {
+    bool allowed = true;
+    {
+        std::lock_guard<std::mutex> lock(routesMutex_);
+        for (const auto& middleware : middlewares_) {
+            if (!middleware) continue;
+            if (!middleware(request, response)) { allowed = false; break; }
+        }
+    }
+    if (!allowed) return;
+
+    const RouteEntry* route = findRoute(request.method, request.path, &request.pathParams);
+    if (route && route->handler) {
+        try {
+            for (const auto& middleware : route->middlewares) {
+                if (!middleware) continue;
+                if (!middleware(request, response)) return;
+            }
+            route->handler(request, response);
+        } catch (const std::exception& e) {
+            response.statusCode = 500;
+            response.error(500, "error: " + std::string(e.what()));
+        }
+    } else {
+        bool handled = false;
+        if (notFoundHandler_) {
+            try { handled = notFoundHandler_(request, response); } catch (...) { handled = false; }
+        }
+        if (!handled) {
+            response.statusCode = 404;
+            response.error(404, "Resource not found");
+        }
+    }
+}
+
+void Server::listenIPv6(int serverSocketIPv6) {
+    while (running_) {
+        struct sockaddr_storage clientAddr{};  // 使用sockaddr_storage通用结构
+        socklen_t clientAddrLen = sizeof(clientAddr);
+
+        int clientSocket = accept(serverSocketIPv6,
+                                  (struct sockaddr*)&clientAddr,
+                                  &clientAddrLen);
+        if (clientSocket < 0) {
+            if (running_) {
+                std::cerr << "Error: Failed to accept IPv6 connection: "
+                          << strerror(errno) << std::endl;
+            }
+            continue;
+        }
+
+        // 根据地址族传递正确的参数
+        if (clientAddr.ss_family == AF_INET6) {
+            threadpool_.addTask(&Server::handleClientIPv6, this,
+                                clientSocket,
+                                (const sockaddr_in6*)&clientAddr);
+        }
+    }
+
+#ifdef _WIN32
+    closesocket(serverSocketIPv6);
+#else
+    close(serverSocketIPv6);
+#endif
+}
+
+std::string Server::getLanIpv4() {
+    std::string lanIp = "127.0.0.1"; // 默认本地回环（获取失败时返回）
+    int sockfd = -1;
+
+#ifdef _WIN32
+    // Windows 初始化 Winsock（仅当前函数内临时使用，避免影响全局）
+    WSADATA wsaData;
+    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
+        return lanIp;
+    }
+#endif
+
+    // 1. 创建 UDP socket（SOCK_DGRAM），仅用于获取本地 IP，不实际发送数据
+    sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sockfd < 0) {
+#ifdef _WIN32
+        WSACleanup();
+#endif
+        return lanIp;
+    }
+
+    // 2. 配置公网服务器地址（Google DNS 8.8.8.8，端口 53，仅用于触发本地路由）
+    struct sockaddr_in serverAddr{};
+    memset(&serverAddr, 0, sizeof(serverAddr));
+    serverAddr.sin_family = AF_INET;
+    serverAddr.sin_port = htons(53); // DNS 端口（任意端口均可，53 是常用默认值）
+
+    // 解析 IP 地址（兼容 IPv4 字符串直接转换）
+    if (inet_pton(AF_INET, "8.8.8.8", &serverAddr.sin_addr) <= 0) {
+        // 解析失败时，尝试通过域名解析（可选，增强兼容性）
+        struct hostent* host = gethostbyname("8.8.8.8");
+        if (host == nullptr || host->h_addr_list[0] == nullptr) {
+#ifdef _WIN32
+            closesocket(sockfd);
+            WSACleanup();
+#else
+            close(sockfd);
+#endif
+            return lanIp;
+        }
+        memcpy(&serverAddr.sin_addr, host->h_addr_list[0], host->h_length);
+    }
+
+    // 3. 连接 UDP socket（UDP 是无连接协议，但 connect 仅用于绑定目标地址，不建立实际连接）
+    // 此操作会让系统自动选择本地合适的网卡（局域网网卡）和端口，从而获取局域网 IP
+    if (connect(sockfd, (struct sockaddr*)&serverAddr, sizeof(serverAddr)) == 0) {
+        // 4. 获取本地绑定的地址（即局域网 IP）
+        struct sockaddr_in localAddr{};
+        socklen_t localAddrLen = sizeof(localAddr);
+        if (getsockname(sockfd, (struct sockaddr*)&localAddr, &localAddrLen) == 0) {
+            // 转换网络字节序 IP 到字符串
+            char ipBuf[INET_ADDRSTRLEN] = {0};
+            if (inet_ntop(AF_INET, &localAddr.sin_addr, ipBuf, sizeof(ipBuf)) != nullptr) {
+                lanIp = ipBuf;
+            }
+        }
+    }
+
+    // 5. 清理资源
+#ifdef _WIN32
+    closesocket(sockfd);
+    WSACleanup();
+#else
+    close(sockfd);
+#endif
+
+    return lanIp;
+}
+
+
+std::string Server::getLanIpv6() {
+    std::string lanIpv6 = "::1";
+    int sockfd = -1;
+
+#ifdef _WIN32
+    WSADATA wsaData;
+    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
+        return lanIpv6;
+    }
+#endif
+
+    sockfd = socket(AF_INET6, SOCK_DGRAM, 0);
+    if (sockfd < 0) {
+#ifdef _WIN32
+        WSACleanup();
+#endif
+        return lanIpv6;
+    }
+
+    struct sockaddr_in6 serverAddr{};
+    memset(&serverAddr, 0, sizeof(serverAddr));
+    serverAddr.sin6_family = AF_INET6;
+    serverAddr.sin6_port = htons(53);
+
+    // 解析 IPv6 地址（跨平台兼容版本）
+    if (inet_pton(AF_INET6, "2001:4860:4860::8888", &serverAddr.sin6_addr) <= 0) {
+        struct addrinfo hints{}, *res = nullptr;
+        memset(&hints, 0, sizeof(hints));
+        hints.ai_family = AF_INET6;
+        hints.ai_socktype = SOCK_DGRAM;
+
+        int ret = getaddrinfo("ipv6.google.com", nullptr, &hints, &res);
+        if (ret != 0 || res == nullptr) {
+#ifdef _WIN32
+            closesocket(sockfd);
+            WSACleanup();
+#else
+            close(sockfd);
+#endif
+            return lanIpv6;
+        }
+
+        memcpy(&serverAddr.sin6_addr,
+               &((struct sockaddr_in6*)res->ai_addr)->sin6_addr,
+               sizeof(in6_addr));
+        freeaddrinfo(res);
+    }
+
+    if (connect(sockfd, (struct sockaddr*)&serverAddr, sizeof(serverAddr)) == 0) {
+        struct sockaddr_in6 localAddr{};
+        socklen_t localAddrLen = sizeof(localAddr);
+        if (getsockname(sockfd, (struct sockaddr*)&localAddr, &localAddrLen) == 0) {
+            uint8_t* addrBytes = localAddr.sin6_addr.s6_addr;
+            bool isLinkLocal = (addrBytes[0] == 0xfe && (addrBytes[1] & 0xc0) == 0x80);
+            bool isLoopback = (memcmp(addrBytes, "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01", 16) == 0);
+
+            if (!isLinkLocal && !isLoopback) {
+                char ipBuf[INET6_ADDRSTRLEN] = {0};
+                if (inet_ntop(AF_INET6, &localAddr.sin6_addr, ipBuf, sizeof(ipBuf)) != nullptr) {
+                    lanIpv6 = ipBuf;
+                }
+            }
+        }
+    }
+
+#ifdef _WIN32
+    closesocket(sockfd);
+    WSACleanup();
+#else
+    close(sockfd);
+#endif
+
+    return lanIpv6;
+}
+
+/**
+ * 停止服务器函数
+ * 该函数用于安全地关闭服务器，释放相关资源
+ * Stop server function
+ * This function safely shuts down the server and releases related resources
+ */
+void Server::stop() {
+    if (g_httpServer) g_httpServer->stop();
+    // 检查服务器是否已经停止，如果已停止则直接返回
+    if (!running_) {
+        return;  // 已经停止，避免重复输出
+    }
+    
+    // 设置服务器运行状态为停止
+    running_ = false;
+    // 输出服务器停止信息
+    std::cout << "Server stopped." << std::endl;
+    
+    // 检查服务器套接字是否有效
+    if (serverSocket_ >= 0) {
+        // 关闭服务器套接字
+        close(serverSocket_);
+        // 将套接字描述符重置为无效值
+        serverSocket_ = -1;
+    }
+#ifdef _WIN32
+    // 如果是Windows平台，进行Windows套接字清理
+    WSACleanup();
+#endif
+}
+
+/**
+ * 处理客户端请求的函数
+ * @param clientSocket 客户端套接字描述符
+ * @param clientAddress 客户端地址结构指针
+ * Handle client request function
+ * @param clientSocket Client socket descriptor
+ * @param clientAddress Client address structure pointer
+ */
+// 分组接收相关常量：单次 recv 块大小、请求头最大长度、请求体最大长度（如大文件上传）
+namespace {
+    constexpr size_t RECV_CHUNK_SIZE   = 64 * 1024;       // 64KB 每块
+    constexpr size_t MAX_HEADER_SIZE  = 1 * 1024 * 1024; // 1MB 头上限
+    constexpr size_t MAX_BODY_SIZE    = 100 * 1024 * 1024; // 100MB body 上限，可按需调整
+}
+
+/**
+ * @brief 从原始 HTTP 头字符串中解析 Content-Length（用于分组接收时判断 body 长度）
+ * @param headerPart 请求头部分（到 \r\n\r\n 之前）
+ * @return Content-Length 字节数，未找到或无效则返回 0
+ */
+static size_t parseContentLengthFromHeaders(const std::string& headerPart) {
+    std::string h = headerPart;
+    std::transform(h.begin(), h.end(), h.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    size_t pos = h.find("content-length:");
+    if (pos == std::string::npos) return 0;
+    pos += 14;
+    while (pos < h.size() && (h[pos] == ' ' || h[pos] == '\t')) ++pos;
+    size_t start = pos;
+    while (pos < h.size() && h[pos] >= '0' && h[pos] <= '9') ++pos;
+    if (pos == start) return 0;
+    try {
+        return static_cast<size_t>(std::stoull(h.substr(start, pos - start)));
+    } catch (...) { return 0; }
+}
+// ==================== 【新增】专门处理 IPv6 客户端 ====================
+void Server::handleClientIPv6(int clientSocket, const sockaddr_in6 *clientAddress) {
+    std::time_t now = std::time(nullptr);
+    long long timestamp = static_cast<long long>(now) * 1000;
+
+    std::string requestStr;
+    requestStr.reserve(RECV_CHUNK_SIZE * 2);
+    char buffer[RECV_CHUNK_SIZE];
+
+    // ========== 阶段一：循环接收直到收满完整 HTTP 头（\r\n\r\n 或 \n\n）==========
+    size_t headerEndPos = 0;
+    while (true) {
+        int n = recv(clientSocket, buffer, sizeof(buffer), 0);
+        if (n <= 0) {
+            close(clientSocket);
+            return;
+        }
+        requestStr.append(buffer, static_cast<size_t>(n));
+        size_t he = requestStr.find("\r\n\r\n");
+        if (he == std::string::npos) he = requestStr.find("\n\n");
+        if (he != std::string::npos) {
+            headerEndPos = he + (requestStr.compare(he, 4, "\r\n\r\n") == 0 ? 4u : 2u);
+            break;
+        }
+        if (requestStr.size() > MAX_HEADER_SIZE) {
+            close(clientSocket);
+            return;
+        }
+    }
+
+    // 从已接收的头中解析 Content-Length，确定还需接收的 body 长度
+    std::string headerPart = requestStr.substr(0, headerEndPos);
+    size_t contentLength = parseContentLengthFromHeaders(headerPart);
+
+    if (contentLength > MAX_BODY_SIZE) {
+        close(clientSocket);
+        return;
+    }
+
+    // ========== 阶段二：若存在 body，按块继续接收直到收满 Content-Length 字节 ==========
+    size_t totalNeeded = headerEndPos + contentLength;
+    while (requestStr.size() < totalNeeded) {
+        size_t toRead = std::min(static_cast<size_t>(sizeof(buffer)), totalNeeded - requestStr.size());
+        int n = recv(clientSocket, buffer, static_cast<int>(toRead), 0);
+        if (n <= 0) {
+            close(clientSocket);
+            return;
+        }
+        requestStr.append(buffer, static_cast<size_t>(n));
+    }
+
+    // 【修改】这里调用 IPv6 的获取IP函数
+    Log::getInstance()->write(getFormattedDate() + " " + getClientIPv6(clientAddress));
+
+    // 解析HTTP请求
+    Request request = parseRequest(requestStr);
+
+    // 创建响应对象
+    Response response;
+
+    // 处理 OPTIONS 预检请求（CORS）
+    if (request.method == "OPTIONS") {
+        response.statusCode = 200;
+        response.body = "";
+    } else {
+        bool allowed = true;
+        {
+            std::lock_guard<std::mutex> lock(routesMutex_);
+            for (const auto& middleware : middlewares_) {
+                if (!middleware) continue;
+                if (!middleware(request, response)) {
+                    allowed = false;
+                    break;
+                }
+            }
+        }
+        if (!allowed) goto SEND_RESPONSE;
+
+        // 查找路由处理器
+        const RouteEntry* route = findRoute(request.method, request.path, &request.pathParams);
+        if (route && route->handler) {
+            try {
+                for (const auto& middleware : route->middlewares) {
+                    if (!middleware) continue;
+                    if (!middleware(request, response)) {
+                        allowed = false;
+                        break;
+                    }
+                }
+                if (allowed) route->handler(request, response);
+            } catch (const std::exception& e) {
+                response.statusCode = 500;
+                response.error(500,"error: " + std::string(e.what()));
+            }
+        } else {
+            bool handled = false;
+            if (notFoundHandler_) {
+                try { handled = notFoundHandler_(request, response); }
+                catch (...) { handled = false; }
+            }
+            if (!handled) {
+                response.statusCode = 404;
+                response.error(404, "Resource not found");
+            }
+        }
+    }
+
+    SEND_RESPONSE:
+    std::string responseStr = buildResponse(response);
+#ifdef _WIN32
+    send(clientSocket, responseStr.c_str(), static_cast<int>(responseStr.length()), 0);
+#else
+    send(clientSocket, responseStr.c_str(), responseStr.length(), 0);
+#endif
+    if (response.streamWriter)
+        response.streamWriter(clientSocket);
+
+    // 【修改】这里调用 IPv6 的获取IP函数
+    std::string clientIP = getClientIPv6(clientAddress);
+    std::time_t end_time = std::time(nullptr);
+    long long end_timestamp = static_cast<long long>(end_time) * 1000;
+    applog::access(clientIP + " " + request.method + " " + request.path + " " +
+                   std::to_string(response.statusCode) + " " +
+                   std::to_string(response.body.length()) + " " +
+                   std::to_string(end_timestamp - timestamp) + "ms");
+
+    close(clientSocket);
+}
+
+// 专门获取 IPv6 地址
+std::string Server::getClientIPv6(const sockaddr_in6 *addr) {
+    char ipStr[INET6_ADDRSTRLEN];
+    inet_ntop(AF_INET6, &addr->sin6_addr, ipStr, sizeof(ipStr));
+    return std::string(ipStr);
+}
+
+void Server::handleClient(int clientSocket, const sockaddr_in *clientAddress) {
+//    std::cout<<1<<std::endl;
+//    std::cout<<3<<std::endl;
+
+//    Scheduler::instance().submit([=]() {
+//       std::cout<<1<<std::endl;
+//    });
+    std::time_t now = std::time(nullptr);
+    long long timestamp = static_cast<long long>(now) * 1000;
+
+    std::string requestStr;
+    requestStr.reserve(RECV_CHUNK_SIZE * 2);
+    char buffer[RECV_CHUNK_SIZE];
+
+    // ========== 阶段一：循环接收直到收满完整 HTTP 头（\r\n\r\n 或 \n\n）==========
+    size_t headerEndPos = 0;
+    while (true) {
+        int n = recv(clientSocket, buffer, sizeof(buffer), 0);
+        if (n <= 0) {
+            close(clientSocket);
+            return;
+        }
+        requestStr.append(buffer, static_cast<size_t>(n));
+        size_t he = requestStr.find("\r\n\r\n");
+        if (he == std::string::npos) he = requestStr.find("\n\n");
+        if (he != std::string::npos) {
+            headerEndPos = he + (requestStr.compare(he, 4, "\r\n\r\n") == 0 ? 4u : 2u);
+            break;
+        }
+        if (requestStr.size() > MAX_HEADER_SIZE) {
+            close(clientSocket);
+            return;
+        }
+    }
+
+    // 从已接收的头中解析 Content-Length，确定还需接收的 body 长度
+    std::string headerPart = requestStr.substr(0, headerEndPos);
+    size_t contentLength = parseContentLengthFromHeaders(headerPart);
+
+    if (contentLength > MAX_BODY_SIZE) {
+        close(clientSocket);
+        return;
+    }
+
+    // ========== 阶段二：若存在 body，按块继续接收直到收满 Content-Length 字节 ==========
+    size_t totalNeeded = headerEndPos + contentLength;
+    while (requestStr.size() < totalNeeded) {
+        size_t toRead = std::min(static_cast<size_t>(sizeof(buffer)), totalNeeded - requestStr.size());
+        int n = recv(clientSocket, buffer, static_cast<int>(toRead), 0);
+        if (n <= 0) {
+            close(clientSocket);
+            return;
+        }
+        requestStr.append(buffer, static_cast<size_t>(n));
+    }
+
+//    std::cout<<requestStr.substr(0, std::min(requestStr.size(), size_t(4096)))<<std::endl;
+
+    Log::getInstance()->write(getFormattedDate()+" "+getClientIP(clientAddress));
+
+    // 解析HTTP请求
+    Request request = parseRequest(requestStr);
+
+    // 创建响应对象
+    Response response;
+    
+    // 处理 OPTIONS 预检请求（CORS）
+    if (request.method == "OPTIONS") {
+        response.statusCode = 200;
+        response.body = "";
+        // CORS 头将在 buildResponse 中添加
+    } else {
+        bool allowed = true;
+        {
+            std::lock_guard<std::mutex> lock(routesMutex_);
+            for (const auto& middleware : middlewares_) {
+                if (!middleware)
+                    continue;
+                if (!middleware(request, response)) {
+                    allowed = false;
+                    break;
+                }
+            }
+        }
+        if (!allowed)
+            goto SEND_RESPONSE;
+
+        // 查找路由处理器
+        const RouteEntry* route = findRoute(request.method, request.path, &request.pathParams);
+        if (route && route->handler) {
+//            std::cout<<"fi"<<std::endl;
+            // 如果找到处理器，执行处理函数
+            try {
+                // route-level middlewares
+                for (const auto& middleware : route->middlewares) {
+                    if (!middleware)
+                        continue;
+                    if (!middleware(request, response)) {
+                        allowed = false;
+                        break;
+                    }
+                }
+                if (allowed)
+                    route->handler(request, response);
+            } catch (const std::exception& e) {
+                // 捕获异常并返回500错误
+                response.statusCode = 500;
+                response.error(500,"error: " + std::string(e.what()));
+            }
+        } else {
+//            std::cout<<"1"<<std::endl;
+            // 如果未找到处理器，返回404错误
+            bool handled = false;
+            if (notFoundHandler_) {
+                try { handled = notFoundHandler_(request, response); }
+                catch (...) { handled = false; }
+            }
+            if (!handled) {
+                response.statusCode = 404;
+                response.error(404, "Resource not found");
+            }
+        }
+    }
+
+SEND_RESPONSE:
+    std::string responseStr = buildResponse(response);
+#ifdef _WIN32
+    send(clientSocket, responseStr.c_str(), static_cast<int>(responseStr.length()), 0);
+#else
+    send(clientSocket, responseStr.c_str(), responseStr.length(), 0);
+#endif
+    if (response.streamWriter)
+        response.streamWriter(clientSocket);
+
+    // 打印访问日志（类似Apache/Nginx格式）
+    std::string clientIP = getClientIP(clientAddress);
+    std::time_t end_time = std::time(nullptr);
+    long long end_timestamp = static_cast<long long>(end_time) * 1000;
+    applog::access(clientIP + " " + request.method + " " + request.path + " " +
+                   std::to_string(response.statusCode) + " " +
+                   std::to_string(response.body.length()) + " " +
+                   std::to_string(end_timestamp - timestamp) + "ms");
+
+    close(clientSocket);
+}
+
+
+
+/**
+ * 解析HTTP请求字符串，将其解析为Request结构体
+ * @param requestStr HTTP请求字符串
+ * @return 解析后的Request对象
+ */
+Request Server::parseRequest(const std::string& requestStr) {
+    Request request;
+    size_t he = requestStr.find("\r\n\r\n");
+    if (he == std::string::npos) he = requestStr.find("\n\n");
+    std::string headerPart = (he != std::string::npos) ? requestStr.substr(0, he) : requestStr;
+    std::string bodyPart;
+    if (he != std::string::npos) {
+        size_t bodyStart = he + ((he + 4 <= requestStr.size() && requestStr.compare(he, 4, "\r\n\r\n") == 0) ? 4u : 2u);
+        if (bodyStart <= requestStr.size()) bodyPart = requestStr.substr(bodyStart);
+    }
+
+    std::istringstream iss(headerPart);
+    std::string line;
+    if (std::getline(iss, line)) {
+        std::istringstream lineStream(line);
+        lineStream >> request.method >> request.path;
+        size_t queryPos = request.path.find('?');
+        if (queryPos != std::string::npos) {
+            request.queryParams = parseQueryParams(request.path.substr(queryPos + 1));
+            request.path = request.path.substr(0, queryPos);
+        }
+    }
+    while (std::getline(iss, line)) {
+        if (line.empty() || line == "\r") break;
+        size_t colonPos = line.find(':');
+        if (colonPos != std::string::npos) {
+            std::string key = line.substr(0, colonPos);
+            std::string value = line.substr(colonPos + 1);
+            key.erase(0, key.find_first_not_of(" \t\r"));
+            if (!key.empty()) key.erase(key.find_last_not_of(" \t\r") + 1);
+            value.erase(0, value.find_first_not_of(" \t\r"));
+            if (!value.empty()) value.erase(value.find_last_not_of(" \t\r") + 1);
+            request.headers[key] = value;
+        }
+    }
+
+    size_t contentLength = 0;
+    for (const auto& p : request.headers) {
+        std::string k = p.first;
+        std::transform(k.begin(), k.end(), k.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        if (k == "content-length") {
+            try { contentLength = static_cast<size_t>(std::stoul(p.second)); } catch (...) {}
+            break;
+        }
+    }
+    if (contentLength > 0 && bodyPart.size() >= contentLength)
+        request.body = bodyPart.substr(0, contentLength);
+    else
+        request.body = bodyPart;
+    request.parseBody();
+    return request;
+}
+
+/**
+ * 构建HTTP响应字符串
+ * @param response 包含状态码、头部和响应体的Response对象
+ * @return 构建好的HTTP响应字符串
+ */
+std::string Server::buildResponse(const Response& response) {
+//    std::cout<<"Build Response"<<std::endl;
+//    std::cout<<response.statusCode<<std::endl;
+    std::ostringstream oss;  // 使用字符串流构建响应
+    
+    // 添加状态行，包括HTTP版本、状态码和状态描述
+    oss << "HTTP/1.1 " << response.statusCode << " ";
+    switch (response.statusCode) {
+        case 200: oss << "OK"; break;
+        case 201: oss << "Created"; break;
+        case 204: oss << "No Content"; break;
+        case 301: oss << "Moved Permanently"; break;
+        case 302: oss << "Found"; break;
+        case 304: oss << "Not Modified"; break;
+        case 307: oss << "Temporary Redirect"; break;
+        case 400: oss << "Bad Request"; break;
+        case 401: oss << "Unauthorized"; break;
+        case 403: oss << "Forbidden"; break;
+        case 404: oss << "Not Found"; break;
+        case 405: oss << "Method Not Allowed"; break;
+        case 409: oss << "Conflict"; break;
+        case 413: oss << "Payload Too Large"; break;
+        case 422: oss << "Unprocessable Entity"; break;
+        case 429: oss << "Too Many Requests"; break;
+        case 500: oss << "Internal Server Error"; break;
+        case 502: oss << "Bad Gateway"; break;
+        case 503: oss << "Service Unavailable"; break;
+        default: oss << "Unknown"; break;
+    }
+    oss << "\r\n";  // HTTP协议使用\r\n作为换行符
+    
+    for (const auto& header : response.headers) {
+        oss << header.first << ": " << header.second << "\r\n";
+    }
+    for (const auto& header : response.extraHeaders) {
+        oss << header.first << ": " << header.second << "\r\n";
+    }
+    if (response.headers.find("Content-Length") == response.headers.end())
+        oss << "Content-Length: " << response.body.length() << "\r\n";
+    oss << "\r\n";
+    if (!response.streamWriter)
+        oss << response.body;
+    return oss.str();
+}
+
+/**
+ * 查找并返回与给定方法和路径匹配的处理程序
+ * @param method HTTP方法（如"GET"、"POST"等）
+ * @param path 请求的URL路径
+ * @return 匹配的Handler对象，如果未找到则返回nullptr
+ */
+
+namespace {
+std::string pathUrlDecode(const std::string& value) {
+    std::string out;
+    out.reserve(value.size());
+    for (size_t i = 0; i < value.size(); ++i) {
+        if (value[i] == '%' && i + 2 < value.size()) {
+            auto hex = [](char c) -> int {
+                if (c >= '0' && c <= '9') return c - '0';
+                if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+                if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+                return -1;
+            };
+            int hi = hex(value[i + 1]), lo = hex(value[i + 2]);
+            if (hi >= 0 && lo >= 0) { out.push_back(static_cast<char>(hi * 16 + lo)); i += 2; continue; }
+        }
+        out.push_back(value[i]);
+    }
+    return out;
+}
+
+bool matchPathPattern(const std::string& pattern, const std::string& path,
+                      std::map<std::string, std::string>& params) {
+    if (pattern == path) return true;
+    std::vector<std::string> ps, xs;
+    auto split = [](const std::string& v, std::vector<std::string>& out) {
+        size_t start = 0;
+        while (start <= v.size()) {
+            size_t pos = v.find('/', start);
+            out.push_back(v.substr(start, pos == std::string::npos ? std::string::npos : pos - start));
+            if (pos == std::string::npos) break;
+            start = pos + 1;
+        }
+    };
+    split(pattern, ps); split(path, xs);
+    if (ps.size() != xs.size()) return false;
+    std::map<std::string, std::string> local;
+    for (size_t i = 0; i < ps.size(); ++i) {
+        if (ps[i].size() >= 2 && ps[i].front() == '{' && ps[i].back() == '}') {
+            local[ps[i].substr(1, ps[i].size() - 2)] = pathUrlDecode(xs[i]);
+        } else if (ps[i] != xs[i]) {
+            return false;
+        }
+    }
+    params = std::move(local);
+    return true;
+}
+} // namespace
+
+const RouteEntry* Server::findRoute(const std::string& method, const std::string& path, std::map<std::string, std::string>* pathParams) const {
+    const auto mit = routes_.find(method);
+    if (mit == routes_.end())
+        return nullptr;
+//    std::cout<<path<<std::endl;
+    const auto& methodRoutes = mit->second;
+    const auto rit = methodRoutes.find(path);
+    if (rit != methodRoutes.end()) {
+        if (pathParams) pathParams->clear();
+        return &rit->second;
+    }
+    for (const auto& [pattern, entry] : methodRoutes) {
+        if (pattern.find('{') == std::string::npos) continue;
+        std::map<std::string, std::string> params;
+        if (matchPathPattern(pattern, path, params)) {
+            if (pathParams) *pathParams = std::move(params);
+            return &entry;
+        }
+    }
+    return nullptr;
+}
+
+RouterGroup::RouterGroup(Server& app, std::string prefix, std::vector<Middleware> middlewares)
+    : app_(app), prefix_(std::move(prefix)), middlewares_(std::move(middlewares)) {}
+
+RouterGroup RouterGroup::group(const std::string& prefix) const {
+    std::string nextPrefix = prefix_;
+    if (!prefix.empty()) {
+        if (!nextPrefix.empty() && nextPrefix.back() == '/' && prefix.front() == '/')
+            nextPrefix.pop_back();
+        nextPrefix += prefix;
+    }
+    return RouterGroup(app_, std::move(nextPrefix), middlewares_);
+}
+
+RouterGroup& RouterGroup::use(Middleware middleware) {
+    middlewares_.push_back(std::move(middleware));
+    return *this;
+}
+
+std::string RouterGroup::resolvePath(const std::string& path) const {
+    if (prefix_.empty())
+        return path;
+    if (path.empty())
+        return prefix_;
+    if (prefix_.back() == '/' && path.front() == '/')
+        return prefix_.substr(0, prefix_.size() - 1) + path;
+    if (prefix_.back() != '/' && path.front() != '/')
+        return prefix_ + "/" + path;
+    return prefix_ + path;
+}
+
+std::vector<Middleware> RouterGroup::mergeMiddlewares(const std::vector<Middleware>& routeMiddlewares) const {
+    std::vector<Middleware> merged;
+    merged.reserve(middlewares_.size() + routeMiddlewares.size());
+    merged.insert(merged.end(), middlewares_.begin(), middlewares_.end());
+    merged.insert(merged.end(), routeMiddlewares.begin(), routeMiddlewares.end());
+    return merged;
+}
+
+void RouterGroup::get(const std::string& path, Handler handler) {
+    app_.addRoute("GET", resolvePath(path), std::move(handler), mergeMiddlewares({}));
+}
+
+void RouterGroup::post(const std::string& path, Handler handler) {
+    app_.addRoute("POST", resolvePath(path), std::move(handler), mergeMiddlewares({}));
+}
+
+void RouterGroup::put(const std::string& path, Handler handler) {
+    app_.addRoute("PUT", resolvePath(path), std::move(handler), mergeMiddlewares({}));
+}
+
+void RouterGroup::del(const std::string& path, Handler handler) {
+    app_.addRoute("DELETE", resolvePath(path), std::move(handler), mergeMiddlewares({}));
+}
+
+void RouterGroup::get(const std::string& path, const std::vector<Middleware>& middlewares, Handler handler) {
+    app_.addRoute("GET", resolvePath(path), std::move(handler), mergeMiddlewares(middlewares));
+}
+
+void RouterGroup::post(const std::string& path, const std::vector<Middleware>& middlewares, Handler handler) {
+    app_.addRoute("POST", resolvePath(path), std::move(handler), mergeMiddlewares(middlewares));
+}
+
+void RouterGroup::put(const std::string& path, const std::vector<Middleware>& middlewares, Handler handler) {
+    app_.addRoute("PUT", resolvePath(path), std::move(handler), mergeMiddlewares(middlewares));
+}
+
+void RouterGroup::del(const std::string& path, const std::vector<Middleware>& middlewares, Handler handler) {
+    app_.addRoute("DELETE", resolvePath(path), std::move(handler), mergeMiddlewares(middlewares));
+}
+
+#include <string>
+
+/**
+ * URL解码函数
+ * 用于解码URL中的特殊字符，如将%编码的字符转换为原始字符，将+转换为空格
+ * @param value 需要解码的URL字符串
+ * @return 解码后的字符串
+ */
+std::string Server::urlDecode(const std::string& value) {
+    std::string result;
+    result.reserve(value.size());  // 预分配内存，提升效率
+
+    for (size_t i = 0; i < value.size(); ++i) {
+        if (value[i] == '+') {
+            // 处理查询参数中的空格（+ 对应空格）
+            result += ' ';
+        } else if (value[i] == '%' && i + 2 < value.size()) {
+            // 提取 % 后的两个十六进制字符
+            char c1 = value[i + 1];
+            char c2 = value[i + 2];
+
+            // 检查是否为有效的十六进制字符（0-9, a-f, A-F）
+            auto isHexChar = [](char c) {
+                return (c >= '0' && c <= '9') ||
+                       (c >= 'a' && c <= 'f') ||
+                       (c >= 'A' && c <= 'F');
+            };
+
+            if (!isHexChar(c1) || !isHexChar(c2)) {
+                // 无效的十六进制字符，保留 % 并继续
+                result += value[i];
+                continue;
+            }
+
+            // 转换十六进制字符串为字节值（避免使用 stoi 减少异常）
+            auto hexToByte = [](char c) {
+                if (c >= '0' && c <= '9') return c - '0';
+                if (c >= 'a' && c <= 'f') return 10 + (c - 'a');
+                return 10 + (c - 'A'); // 大写字母
+            };
+
+            unsigned char byte = (hexToByte(c1) << 4) | hexToByte(c2);
+            result += static_cast<char>(byte);
+            i += 2;  // 跳过已处理的两个字符
+        } else {
+            // 普通字符直接添加（包括 ASCII 和 UTF-8 多字节的后续字节）
+            result += value[i];
+        }
+    }
+
+    return result;
+}
+
+/**
+ * 解析URL查询参数字符串，将其转换为键值对映射
+ * Parse URL query parameter string and convert to key-value pair map
+ * @param query 包含查询参数的字符串，格式为"key1=value1&key2=value2..."
+ * @return 包含解析后的键值对的map，其中值经过URL解码
+ */
+std::map<std::string, std::string> Server::parseQueryParams(const std::string& query) {
+    std::map<std::string, std::string> params;  // 存储解析后的键值对
+    std::istringstream iss(query);              // 使用字符串流处理查询字符串
+    std::string pair;                          // 存储单个键值对字符串
+    
+    // 按 '&' 分割查询字符串，逐个处理键值对
+    while (std::getline(iss, pair, '&')) {
+        size_t pos = pair.find('=');           // 查找 '=' 的位置
+        if (pos != std::string::npos) {        // 如果找到 '='
+            std::string key = pair.substr(0, pos);      // 提取键
+            std::string value = pair.substr(pos + 1);   // 提取值
+            params[key] = urlDecode(value);    // 对值进行URL解码并存入map
+        }
+    }
+    
+    return params;
+}  // 返回解析后的参数map
+
+void Server::printRegisteredRoutes() const {
+    std::cout << "\n========================================" << std::endl;
+    std::cout << "Registered API Routes:" << std::endl;
+    std::cout << "========================================" << std::endl;
+    
+    if (routes_.empty()) {
+        std::cout << "  (No routes registered)" << std::endl;
+    } else {
+        // 按HTTP方法分组显示
+        const std::vector<std::string> methods = {"GET", "POST", "PUT", "DELETE"};
+        
+        for (const auto& method : methods) {
+            if (routes_.find(method) != routes_.end()) {
+                const auto& methodRoutes = routes_.at(method);
+                if (!methodRoutes.empty()) {
+                    std::cout << "\n  " << method << ":" << std::endl;
+                    for (const auto& route : methodRoutes) {
+                        std::cout << "    " << route.first << std::endl;
+                    }
+                }
+            }
+        }
+    }
+    
+    std::cout << "========================================" << std::endl;
+}
+
+std::string getFormattedDate() {
+    std::time_t now = std::time(nullptr);
+    std::tm* timeInfo = std::localtime(&now);
+    
+    std::ostringstream oss;
+    oss << std::put_time(timeInfo, "%d/%b/%Y:%H:%M:%S");
+    
+    // 获取时区偏移（简化版，显示+0800格式）
+#ifdef _WIN32
+    // Windows上的时区处理
+    TIME_ZONE_INFORMATION tzInfo;
+    GetTimeZoneInformation(&tzInfo);
+    int offset = -tzInfo.Bias / 60;  // Bias是以分钟为单位，需要转换为小时
+#else
+    // Linux上的时区处理
+    int offset = timeInfo->tm_gmtoff / 3600;
+#endif
+    
+    oss << " " << std::showpos << std::setfill('0') << std::setw(3) 
+        << offset << "00";
+    
+    return oss.str();
+}
+
+std::string Server::getClientIP(const sockaddr_in *clientAddress) {
+    if (!clientAddress) {
+        return "unknown";
+    }
+    
+    char ipStr[INET_ADDRSTRLEN];
+#ifdef _WIN32
+    InetNtopA(AF_INET, &(clientAddress->sin_addr), ipStr, INET_ADDRSTRLEN);
+#else
+    inet_ntop(AF_INET, &(clientAddress->sin_addr), ipStr, INET_ADDRSTRLEN);
+#endif
+    
+    return std::string(ipStr);
+}
+
+Server* Server::getInstance() {
+    return instance_;
+}
+
+void Server::signalHandler(int /*sig*/) {
+
+}
+
+void Server::doTaskRegular(long long during) const {
+    // 1. 参数合法性校验
+    if (during <= 0) {
+        std::cerr << "Error: during must be positive (current: " << during << ")" << std::endl;
+        return;
+    }
+
+    // 2. 简化时间戳获取：使用别名缩短代码
+    using namespace std::chrono;
+    milliseconds interval(during);
+    milliseconds sleep_interval(std::max(during / 10, 1LL)); // 最小休眠1ms，避免0ms空转
+
+    // 3. 初始时间戳（使用steady_clock避免系统时间修改导致的误差）
+    time_point<steady_clock> last_exec_time = steady_clock::now();
+
+    // 4. 定时任务主循环
+    while (running_) {
+        time_point<steady_clock> now = steady_clock::now();
+        // 计算距离上次执行的时间差
+        auto elapsed = duration_cast<milliseconds>(now - last_exec_time);
+
+        // 5. 达到间隔时间则执行任务
+        if (elapsed >= interval) {
+            try {
+                task(); // 捕获任务异常，避免主线程崩溃
+                last_exec_time = now; // 更新执行时间（基于当前时间，而非累加，避免漂移）
+            } catch (const std::exception &e) {
+                std::cerr << "Task execute failed: " << e.what() << std::endl;
+                last_exec_time = now; // 即使任务失败，仍更新时间（避免频繁重试）
+            } catch (...) {
+                std::cerr << "Task execute failed: unknown error" << std::endl;
+                last_exec_time = now;
+            }
+        }
+
+        // 6. 智能休眠：计算剩余时间，避免过度休眠/空转
+        // 剩余时间 = 间隔时间 - 已流逝时间
+        auto remaining = interval - elapsed;
+        if (remaining > sleep_interval) {
+            std::this_thread::sleep_for(sleep_interval);
+        } else if (remaining > milliseconds(0)) {
+            // 剩余时间不足sleep_interval时，休眠剩余时间，提升精度
+            std::this_thread::sleep_for(remaining);
+        }
+        // 剩余时间为负时，不休眠，直接进入下一轮检查
+    }
+
+    std::cout << "Regular task loop stopped" << std::endl;
+}

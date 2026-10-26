@@ -1,0 +1,10 @@
+backend/build/
+backend/web/
+backend/secrets/
+backend/data/
+backend/config.local.yml
+frontend/node_modules/
+frontend/dist/
+backend/log.log
+*.log
+SSE_OAUTH_APP.sql
