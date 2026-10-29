@@ -5,6 +5,8 @@
 #include <sstream>
 #include <fstream>
 #include <iomanip>
+#include <atomic>
+#include <exception>
 
 // 平台特有头文件
 #include <iostream>
@@ -190,15 +192,42 @@ BOOL WINAPI CrashHandler::consoleCtrlHandler(DWORD dwCtrlType) {
 
 // 未捕获C++异常处理
 void CrashHandler::terminateHandler() {
+    // Reentrancy guard: this handler runs DURING terminate(). Any further
+    // terminate (including one caused by our own code below) must not
+    // recurse — the old bare `throw;` with no active exception called
+    // terminate() again, recursing ~150k frames until the stack overflowed
+    // with SIGSEGV (core dumped) on every graceful SIGTERM shutdown.
+    static std::atomic<bool> inTerminate{false};
+    if (inTerminate.exchange(true)) {
+#ifdef _WIN32
+        ExitProcess(EXIT_FAILURE);
+#else
+        _exit(EXIT_FAILURE);
+#endif
+    }
+
     std::string reason = "Uncaught C++ exception";
-    try {
-        throw; // 重新抛出异常，获取具体信息
-    } catch (const std::exception& e) {
-        reason += ": " + std::string(e.what());
-    } catch (...) {
-        reason += ": Unknown exception type";
+    if (std::uncaught_exceptions() > 0) {
+        try {
+            throw; // 重新抛出异常，获取具体信息
+        } catch (const std::exception& e) {
+            reason += ": " + std::string(e.what());
+        } catch (...) {
+            reason += ": Unknown exception type";
+        }
+    } else {
+        // throw; with no active exception would call terminate() again.
+        // Typical case: a joinable std::thread destroyed, or noexcept violated.
+        reason += " (no active exception — joinable thread destroyed or noexcept violation)";
     }
     instance().gracefulExit(EXIT_FAILURE, reason);
+    // gracefulExit ends in _exit(); belt and braces so we never return
+    // "into" terminate() with the latch set.
+#ifdef _WIN32
+    ExitProcess(EXIT_FAILURE);
+#else
+    _exit(EXIT_FAILURE);
+#endif
 }
 
 // 辅助函数：格式化时间（跨平台）

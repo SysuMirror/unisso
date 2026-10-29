@@ -3,8 +3,10 @@
 #include <curl/curl.h>
 
 #include <chrono>
+#include <condition_variable>
 #include <filesystem>
 #include <iostream>
+#include <mutex>
 #include <thread>
 
 namespace {
@@ -114,14 +116,30 @@ void health(const Request&, Response& res) {
 
 namespace services {
 
+namespace {
+std::mutex hbMutex;
+std::condition_variable hbCv;
+bool hbStop = false;
+std::thread hbThread;
+}  // namespace
+
 void startHeartbeat() {
     auto& cfg = AppConfig::get();
     if (cfg.reportUrl.empty() || cfg.reportToken.empty() || cfg.deployId.empty()) {
         return;
     }
-    std::thread([cfg]() {
-        std::this_thread::sleep_for(std::chrono::seconds(2));
+    {
+        std::lock_guard<std::mutex> lock(hbMutex);
+        hbStop = false;
+    }
+    // Joinable (not detached): stopHeartbeat() must be able to join this
+    // thread before static destruction, otherwise it keeps running against
+    // destroyed globals during exit().
+    hbThread = std::thread([cfg]() {
+        std::unique_lock<std::mutex> lock(hbMutex);
+        if (hbCv.wait_for(lock, std::chrono::seconds(2), [] { return hbStop; })) return;
         while (true) {
+            lock.unlock();
             CURL* curl = curl_easy_init();
             if (curl) {
                 std::string body = "{\"deploy_id\":\"" + cfg.deployId +
@@ -140,9 +158,19 @@ void startHeartbeat() {
                 curl_slist_free_all(headers);
                 curl_easy_cleanup(curl);
             }
-            std::this_thread::sleep_for(std::chrono::seconds(30));
+            lock.lock();
+            if (hbCv.wait_for(lock, std::chrono::seconds(30), [] { return hbStop; })) return;
         }
-    }).detach();
+    });
+}
+
+void stopHeartbeat() {
+    {
+        std::lock_guard<std::mutex> lock(hbMutex);
+        hbStop = true;
+    }
+    hbCv.notify_all();
+    if (hbThread.joinable()) hbThread.join();
 }
 
 }  // namespace services

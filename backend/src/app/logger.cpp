@@ -93,6 +93,15 @@ void init() {
     enqueue("backend.log", "logger initialized dir=" + logPath.string());
 }
 
+void shutdown() {
+    {
+        std::lock_guard<std::mutex> lock(queueMutex);
+        stopping = true;
+    }
+    queueCv.notify_all();
+    if (worker.joinable()) worker.join();
+}
+
 std::string dir() { return logPath.empty() ? std::string("/home/cloud/deploy/logs") : logPath.string(); }
 
 void access(const std::string& line) { enqueue("backend.log", line); }

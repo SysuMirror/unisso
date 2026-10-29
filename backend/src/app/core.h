@@ -617,4 +617,5 @@ void accountLinkUnbind(const Request& req, Response& res);
 // Infrastructure services started once at boot.
 namespace services {
 void startHeartbeat();
+void stopHeartbeat();
 }

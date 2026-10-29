@@ -55,10 +55,17 @@ int main() {
 
         services::startHeartbeat();
         app.run();
+        // Order matters: join every background thread while static globals
+        // (logger queue, Db, Cache) are still alive. Returning from main
+        // runs exit() -> static destructors; a joinable std::thread
+        // destroyed there calls std::terminate().
+        services::stopHeartbeat();
+        applog::shutdown();
         std::cout << "UniSSO v2 exited" << std::endl;
         return 0;
     } catch (const std::exception& e) {
         std::cerr << "FATAL: " << e.what() << std::endl;
+        services::stopHeartbeat();
         return 1;
     }
 }
