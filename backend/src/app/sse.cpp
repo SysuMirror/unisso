@@ -393,6 +393,24 @@ std::optional<User> upsertUser(const Profile& profile, const std::string& passwo
             updates += ", avatar=COALESCE(NULLIF(avatar,''), " +
                        Db::quote(profile.avatar) + ")";
         }
+        // An account that was registered locally with the same email before
+        // the marketplace identity was bound keeps a placeholder display name
+        // (empty full_name, "user_xxxxxxxx" username). Apps that asked for
+        // profile:name then see a fresh anonymous account instead of the
+        // marketplace identity they just logged in with. Adopt the SSE
+        // display name once, when the account has none of its own.
+        if (existing && existing->fullName.empty() && !profile.name.empty()) {
+            std::string nm;
+            size_t chars = 0;
+            for (size_t i = 0; i < profile.name.size() && chars < 120; chars++) {
+                unsigned char lead = (unsigned char)profile.name[i];
+                size_t step = lead >= 240 ? 4 : lead >= 224 ? 3 : lead >= 192 ? 2 : 1;
+                if (i + step > profile.name.size()) break;
+                nm.append(profile.name, i, step);
+                i += step;
+            }
+            updates += ", full_name=" + Db::quote(util::trim(nm));
+        }
         Db::exec("UPDATE users SET " + updates + " WHERE id=" + Db::quote(existing->id));
         existing = repo::findUserById(existing->id);
     }

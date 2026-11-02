@@ -332,7 +332,7 @@ async function poll() {
         stopPolling()
         resetCsrf()
         await loadMe(true)
-        router.push('/')
+        router.push(safeNext(data?.next))
       } else if (data.status === 'expired') {
         stopPolling()
         stopCountdown()
@@ -379,7 +379,7 @@ async function startQr(provider = 'sso') {
     let url = ''
     let expires = 300
     if (provider === 'sse') {
-      const data = await api('/api/auth/sse/qr/start')
+      const data = await api('/api/auth/sse/qr/start?next=' + encodeURIComponent(safeNext(route.query.next)))
       qrState.value = data.state
       qrId.value = ''
       url = data.qr_url
@@ -424,7 +424,7 @@ async function sseDirectLogin() {
   sseJumping.value = true
   error.value = ''
   try {
-    const data = await api('/api/auth/sse/qr/start')
+    const data = await api('/api/auth/sse/qr/start?next=' + encodeURIComponent(safeNext(route.query.next)))
     if (data?.qr_url) {
       window.location.assign(data.qr_url)
       return

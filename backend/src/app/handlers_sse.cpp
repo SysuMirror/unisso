@@ -33,6 +33,11 @@ std::string htmlEscape(const std::string& value) {
     return out;
 }
 
+// Relative in-app paths only (e.g. /authorize?...); anything else lands on /.
+std::string safeNextPath(const std::string& next) {
+    return next.rfind("/", 0) == 0 && next.rfind("//", 0) != 0 ? next : "/";
+}
+
 bool validState(const std::string& state) {
     if (state.size() < 16 || state.size() > 128) return false;
     for (unsigned char c : state) {
@@ -99,6 +104,10 @@ void sseQrStart(const Request& req, Response& res) {
     std::string state = util::randomToken(24);
     std::map<std::string, JsonValue> pending;
     pending["status"] = JsonValue("pending");
+    // The login page reached us from /authorize (third-party SSO). Remember
+    // where to go after login so the browser returns to the consent page
+    // instead of the UniSSO home.
+    pending["next"] = JsonValue(safeNextPath(util::trim(http::query(req, "next"))));
     pending["created_at"] = jsonx::num(util::nowEpoch());
     Cache::setJson("sse_qr:" + state, jsonx::dump(pending), 300);
     // The browser that displays the QR must be the one that claims the
@@ -158,7 +167,7 @@ void sseQrPoll(const Request& req, Response& res) {
     }
     // The session is created here (the desktop browser), not on the phone,
     // so device trust and the step-up gate see the desktop's UA/IP/cookie.
-    std::string next = "/";
+    std::string next = safeNextPath(jsonx::getString(data, "next", "/"));
     if (loginNeedsStepUp(*user, req, true)) {
         Cache::del("sse_qr:" + state);
         Cache::del("sse_qr_claim:" + state);
@@ -178,6 +187,7 @@ void sseQrPoll(const Request& req, Response& res) {
     Cache::del("sse_qr_claim:" + state);
     applog::access("[auth] sse-qr login user=" + user->id);
     obj["status"] = JsonValue("authorized");
+    obj["next"] = JsonValue(next);
     http::json(res, 200, JsonValue(obj));
 }
 
@@ -298,10 +308,11 @@ void sseOauthCallback(const Request& req, Response& res) {
     // dead-end "back to your computer" page. A second device that scanned has
     // no such cookie and keeps the original approval-only path.
     if (http::cookie(req, "unisso_qr_state") == state) {
+        std::string next = safeNextPath(jsonx::getString(pending, "next", "/"));
         if (loginNeedsStepUp(*user, req, true)) {
             Response stepRes;
             std::string stepToken;
-            beginStepUp(req, stepRes, *user, "/", true, &stepToken);
+            beginStepUp(req, stepRes, *user, next, true, &stepToken);
             Cache::del("sse_qr:" + state);
             Cache::del(claimKey);
             if (!stepToken.empty()) {
@@ -328,7 +339,7 @@ void sseOauthCallback(const Request& req, Response& res) {
         Cache::del("sse_qr:" + state);
         Cache::del(claimKey);
         applog::access("[sse-oauth] same-device login user=" + user->id);
-        html(res, 200, redirectHtml("/"));
+        html(res, 200, redirectHtml(next));
         return;
     }
     // The phone only records the approval. The desktop session (and any
@@ -337,6 +348,9 @@ void sseOauthCallback(const Request& req, Response& res) {
     std::map<std::string, JsonValue> authorized;
     authorized["status"] = JsonValue("authorized");
     authorized["user_id"] = JsonValue(user->id);
+    // Carry the original destination over so the polling desktop browser can
+    // return to /authorize after claiming the session.
+    authorized["next"] = JsonValue(safeNextPath(jsonx::getString(pending, "next", "/")));
     authorized["decided_at"] = jsonx::num(util::nowEpoch());
     Cache::setJson("sse_qr:" + state, jsonx::dump(authorized), 300);
     applog::access("[sse-qr] login approved user=" + user->id);
