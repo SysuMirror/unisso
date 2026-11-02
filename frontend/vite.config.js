@@ -6,7 +6,11 @@ export default defineConfig({
   build: {
     outDir: '../backend/web',
     emptyOutDir: true,
-    sourcemap: false
+    sourcemap: false,
+    // Old WebView kernels (WeChat XWeb < 104, iOS Safari < 16.4) silently
+    // drop range-syntax media queries like `@media (width<=900px)`, which
+    // breaks the entire mobile layout. Lower them to legacy max-width form.
+    cssTarget: 'chrome61'
   },
   server: {
     proxy: {

@@ -115,7 +115,7 @@
 
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import AuthShell from '../components/AuthShell.vue'
 import Modal from '../components/Modal.vue'
 import FaceCapture from '../components/FaceCapture.vue'
@@ -123,6 +123,7 @@ import { api, resetCsrf } from '../api'
 import { loadMe } from '../store'
 
 const router = useRouter()
+const route = useRoute()
 const token = ref('')
 const emailHint = ref('')
 const next = ref('/')
@@ -372,7 +373,8 @@ async function sendCode() {
     notice.value = '验证码已发送，请查收邮箱。'
     startCooldown(60)
   } catch (e) {
-    if (e.status === 401 || e.status === 403) {
+    const errCode = e.data?.error
+    if (errCode === 'step_up_expired' || errCode === 'step_up_required') {
       clearState()
       router.replace('/login')
       return
@@ -400,7 +402,12 @@ async function verify() {
     await loadMe(true)
     router.replace(target.startsWith('/') && !target.startsWith('//') ? target : '/')
   } catch (e) {
-    if (e.status === 401 || e.status === 403) {
+    // Only leave the page when the challenge itself is dead. A wrong code is
+    // a plain 401 invalid_code — the challenge is still alive, keep it so the
+    // user can just retype the code instead of logging in again.
+    const errCode = e.data?.error
+    if (errCode === 'step_up_expired' || errCode === 'step_up_required' ||
+        errCode === 'invalid_account' || errCode === 'too_many_attempts') {
       clearState()
       router.replace('/login')
       return
@@ -428,6 +435,15 @@ async function cancel() {
 }
 
 onMounted(() => {
+  // Direct navigations (e.g. the marketplace same-device callback) carry the
+  // token in the URL; XHR-driven flows keep it in sessionStorage.
+  const queryToken = typeof route.query.token === 'string' ? route.query.token : ''
+  if (queryToken) {
+    sessionStorage.setItem('unisso.stepup.token', queryToken)
+    const queryNext = typeof route.query.next === 'string' && route.query.next.startsWith('/')
+      && !route.query.next.startsWith('//') ? route.query.next : ''
+    if (queryNext) sessionStorage.setItem('unisso.stepup.next', queryNext)
+  }
   token.value = sessionStorage.getItem('unisso.stepup.token') || ''
   emailHint.value = sessionStorage.getItem('unisso.stepup.email') || ''
   next.value = sessionStorage.getItem('unisso.stepup.next') || '/'

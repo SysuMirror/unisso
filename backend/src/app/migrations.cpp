@@ -34,8 +34,28 @@ void run() {
     addColumn("users", "is_internal", "TINYINT(1) NOT NULL DEFAULT 0");
     addColumn("users", "sse_user_id", "VARCHAR(64) NULL");
     addColumn("users", "is_super_admin", "TINYINT(1) NOT NULL DEFAULT 0");
-    addColumn("users", "step_up_enabled", "TINYINT(1) NOT NULL DEFAULT 1");
+    addColumn("users", "step_up_enabled", "TINYINT(1) NOT NULL DEFAULT 0");
     addColumn("applications", "organization_id", "VARCHAR(36) NULL");
+    // JSON array: IPs a trusted browser has recently authenticated from.
+    // Device trust is bound to these, not just to the device cookie.
+    addColumn("trusted_devices", "known_ips", "TEXT NULL");
+    // 2026-11: second factor is opt-in now. The column default is flipped to 0
+    // so INSERTs that omit step_up_enabled start off (admin accounts are
+    // seeded with it on in domain::createUser instead).
+    runSql("ALTER TABLE users ALTER COLUMN step_up_enabled SET DEFAULT 0",
+           "step_up_enabled default off");
+    runSql(R"SQL(
+CREATE TABLE IF NOT EXISTS migration_flags (
+  name VARCHAR(64) NOT NULL PRIMARY KEY,
+  applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci)SQL", "create migration_flags");
+    if (Db::exec("INSERT IGNORE INTO migration_flags (name) VALUES ('step_up_default_off_2026_11')") == 1) {
+        // One-time opt-out for non-admin accounts that never chose anything
+        // (the switch used to default to on). Re-running this migration later
+        // must not undo deliberate opt-ins, hence the flag guard.
+        runSql("UPDATE users SET step_up_enabled=0 WHERE step_up_enabled=1 AND is_admin=0",
+               "opt out non-admin users from step-up (one time)");
+    }
 
     runSql(R"SQL(
 CREATE TABLE IF NOT EXISTS organizations (
@@ -144,6 +164,7 @@ CREATE TABLE IF NOT EXISTS trusted_devices (
   token_hash VARCHAR(64) NOT NULL,
   user_agent VARCHAR(255) NULL,
   ip VARCHAR(64) NULL,
+  known_ips TEXT NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   last_seen_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uk_device_token (token_hash),
@@ -221,6 +242,22 @@ CREATE TABLE IF NOT EXISTS invites (
   expires_at DATETIME NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci)SQL", "create invites");
+
+    // Users apply to join organizations; super admins and org admins approve.
+    runSql(R"SQL(
+CREATE TABLE IF NOT EXISTS org_join_requests (
+  id VARCHAR(36) NOT NULL PRIMARY KEY,
+  organization_id VARCHAR(36) NOT NULL,
+  user_id VARCHAR(36) NOT NULL,
+  message VARCHAR(512) NULL,
+  status VARCHAR(16) NOT NULL DEFAULT 'pending',
+  reviewed_by VARCHAR(36) NULL,
+  review_note VARCHAR(255) NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NULL,
+  KEY idx_org_join_requests_org (organization_id, status),
+  KEY idx_org_join_requests_user (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci)SQL", "create org_join_requests");
 
     const std::string org = constants::kDefaultOrganizationId;
     runSql("INSERT IGNORE INTO organizations (id,name,slug,description,created_at,updated_at) VALUES (" +

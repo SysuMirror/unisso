@@ -9,6 +9,11 @@
                placeholder="you@example.com" autofocus />
       </label>
 
+      <p v-if="qrEnabled" class="market-hint">
+        已有集市账号？<button type="button" class="market-hint-link" :disabled="sseJumping"
+               @click="sseDirectLogin">{{ sseJumping ? '正在跳转…' : '直接用集市账号登录' }}</button>，无需输入密码。
+      </p>
+
       <label class="auth-field">
         <span>密码</span>
         <input id="login-password" v-model="password" type="password" required autocomplete="current-password"
@@ -35,6 +40,11 @@
         <input v-model.trim="email" type="email" required autocomplete="email"
                placeholder="you@example.com" autofocus />
       </label>
+
+      <p v-if="qrEnabled" class="market-hint">
+        已有集市账号？<button type="button" class="market-hint-link" :disabled="sseJumping"
+               @click="sseDirectLogin">{{ sseJumping ? '正在跳转…' : '直接用集市账号登录' }}</button>，无需验证码。
+      </p>
 
       <button class="auth-submit auth-submit-secondary" type="button"
               :disabled="codeSending || codeCooldown > 0 || !email"
@@ -85,12 +95,23 @@
         <p class="qr-scanned-text">已扫码，请在手机上确认登录</p>
         <p v-if="qrRemain > 0" class="qr-sub-hint">确认成功后本页会自动跳转</p>
       </div>
+      <template v-else-if="isMobile && qrProvider === 'sse'">
+        <p class="auth-qr-hint">本页已在手机上打开，无需扫码。</p>
+        <a class="auth-submit sse-direct-btn" :href="qrTargetUrl">使用集市账号继续</a>
+        <p class="qr-sub-hint">将跳转到集市授权，确认后自动返回并完成登录。</p>
+        <p v-if="qrRemain > 0" class="qr-count" :class="{ 'is-low': qrRemain <= 60 }">
+          {{ qrCountdown }} 后链接失效
+        </p>
+      </template>
       <template v-else>
         <img v-if="qrDataUrl" :src="qrDataUrl" class="auth-qr-img" alt="扫码登录二维码" />
         <p class="auth-qr-hint">{{ qrHint }}</p>
         <p class="qr-sub-hint">{{ qrSubHint }}</p>
         <p v-if="qrRemain > 0" class="qr-count" :class="{ 'is-low': qrRemain <= 60 }">
           {{ qrCountdown }} 后二维码失效
+        </p>
+        <p v-if="isMobile && qrProvider === 'sso'" class="qr-sub-hint">
+          手机本机无法扫自己的码：请用另一台设备扫码，或返回使用邮箱/密码登录。
         </p>
       </template>
       <button class="auth-alt-link" type="button" @click="backToPassword">返回密码登录</button>
@@ -103,6 +124,10 @@
       <button v-if="qrEnabled" class="auth-alt-link" type="button"
               :disabled="qrLoading" @click="startQr('sse')">
         {{ qrLoading && qrProvider === 'sse' ? '正在生成二维码…' : '集市账号扫码登录' }}
+      </button>
+      <button v-if="qrEnabled" class="auth-alt-link sse-direct-login" type="button"
+              :disabled="sseJumping" @click="sseDirectLogin">
+        {{ sseJumping ? '正在跳转集市…' : '集市账号登录' }}
       </button>
     </div>
 
@@ -138,6 +163,14 @@ const qrMode = ref(false)
 const qrProvider = ref('sso')
 const qrLoading = ref(false)
 const qrDataUrl = ref('')
+const qrTargetUrl = ref('')
+const sseJumping = ref(false)
+
+// Phone browsers cannot scan a QR code shown on the same screen; those flows
+// switch to a direct jump (same-browser OAuth, session completes on return).
+const mobileQuery = window.matchMedia('(max-width: 720px)')
+const isMobile = ref(mobileQuery.matches)
+mobileQuery.addEventListener('change', (e) => { isMobile.value = e.matches })
 const qrState = ref('')
 const qrId = ref('')
 const qrError = ref('')
@@ -183,6 +216,18 @@ const qrSubHint = computed(() => qrProvider.value === 'sse'
 
 function safeNext(value) {
   return typeof value === 'string' && value.startsWith('/') && !value.startsWith('//') ? value : '/'
+}
+
+function enterStepUp(data, fallbackNext = '/') {
+  stopPolling()
+  stopCountdown()
+  sessionStorage.setItem('unisso.stepup.token', data.step_up_token || '')
+  sessionStorage.setItem('unisso.stepup.email', data.email_hint || '')
+  sessionStorage.setItem('unisso.stepup.next', safeNext(data.next || fallbackNext))
+  sessionStorage.setItem('unisso.stepup.methods', JSON.stringify(data.methods || ['email']))
+  sessionStorage.setItem('unisso.stepup.trustDays', String(data.trust_days || 180))
+  resetCsrf()
+  router.push('/step-up')
 }
 
 function switchMode(mode) {
@@ -252,13 +297,7 @@ async function submit() {
       body: { email: email.value, password: password.value, next }
     })
     if (data?.step_up_required) {
-      sessionStorage.setItem('unisso.stepup.token', data.step_up_token || '')
-      sessionStorage.setItem('unisso.stepup.email', data.email_hint || '')
-      sessionStorage.setItem('unisso.stepup.next', safeNext(data.next || next))
-      sessionStorage.setItem('unisso.stepup.methods', JSON.stringify(data.methods || ['email']))
-      sessionStorage.setItem('unisso.stepup.trustDays', String(data.trust_days || 180))
-      resetCsrf()
-      router.push('/step-up')
+      enterStepUp(data, next)
       return
     }
     resetCsrf()
@@ -283,6 +322,12 @@ async function poll() {
     if (qrProvider.value === 'sse') {
       if (!qrState.value) return
       const data = await api('/api/auth/sse/qr/poll?state=' + encodeURIComponent(qrState.value))
+      if (data.step_up_required) {
+        // Scan approved, but this browser/IP is a new device or the account
+        // is dormant: finish on the step-up page before the session exists.
+        enterStepUp(data, '/')
+        return
+      }
       if (data.status === 'authorized') {
         stopPolling()
         resetCsrf()
@@ -297,6 +342,10 @@ async function poll() {
     }
     if (!qrId.value) return
     const data = await api('/api/auth/qr/poll?id=' + encodeURIComponent(qrId.value))
+    if (data.step_up_required) {
+      enterStepUp(data)
+      return
+    }
     if (data.status === 'ok') {
       stopPolling()
       resetCsrf()
@@ -348,6 +397,7 @@ async function startQr(provider = 'sso') {
       width: 220,
       color: { dark: '#171717', light: '#fbfbfa' }
     })
+    qrTargetUrl.value = url
     qrProvider.value = provider
     qrMode.value = true
     pollTimer = setInterval(poll, 1200)
@@ -366,10 +416,32 @@ function switchQr(provider) {
   startQr(provider)
 }
 
+// Direct marketplace OAuth: jump straight to the authorize page and come back
+// to /api/auth/sse/oauth/callback. The server completes the login in this
+// same browser (session or step-up), no QR scanning needed.
+async function sseDirectLogin() {
+  if (sseJumping.value) return
+  sseJumping.value = true
+  error.value = ''
+  try {
+    const data = await api('/api/auth/sse/qr/start')
+    if (data?.qr_url) {
+      window.location.assign(data.qr_url)
+      return
+    }
+    error.value = '集市登录暂不可用，请稍后重试'
+  } catch (e) {
+    error.value = e.message
+  } finally {
+    sseJumping.value = false
+  }
+}
+
 function backToPassword() {
   stopPolling()
   stopCountdown()
   qrMode.value = false
+  qrTargetUrl.value = ''
   qrError.value = ''
   qrExpired.value = false
   qrDenied.value = false
@@ -465,4 +537,38 @@ onUnmounted(() => {
   background: rgba(22, 163, 74, .1);
 }
 .qr-scanned-text { margin: 8px 0 0; font-size: 15px; font-weight: 600; }
+.sse-direct-btn {
+  display: block;
+  margin-top: 14px;
+  text-align: center;
+  line-height: 44px;
+  text-decoration: none;
+}
+.auth-alt-link.sse-direct-login {
+  padding: 6px 16px;
+  border: 1px solid var(--ink);
+  border-radius: 999px;
+  color: var(--ink);
+  font-weight: 400;
+  text-decoration: none;
+}
+.auth-alt-link.sse-direct-login:hover { background: var(--ink); color: #fff; }
+.market-hint {
+  margin: -6px 0 10px;
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--ink-faint);
+}
+.market-hint-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-weight: 400;
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.market-hint-link:disabled { opacity: .55; cursor: default; }
 </style>

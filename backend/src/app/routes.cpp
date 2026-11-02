@@ -84,6 +84,10 @@ void registerAll(Server& app) {
     app.post("/api/orgs/{id}/members", handlers::organizationsAddMember);
     app.put("/api/orgs/{id}/members/{userId}", handlers::organizationsSetMember);
     app.del("/api/orgs/{id}/members/{userId}", handlers::organizationsRemoveMember);
+    app.post("/api/orgs/{id}/join-requests", handlers::organizationsJoinApply);
+    app.get("/api/org-join-requests", handlers::orgJoinRequestsPending);
+    app.get("/api/org-join-requests/mine", handlers::orgJoinRequestsMine);
+    app.post("/api/org-join-requests/{id}/review", handlers::orgJoinRequestReview);
 
     app.get("/api/apps/integration-skill", handlers::appIntegrationSkill);
     app.get("/api/apps", handlers::appsList);

@@ -60,6 +60,18 @@
         </select>
       </div>
 
+      <div v-if="sseIdentities.length > 1" class="consent-identities">
+        <div class="consent-identities-label">以哪个集市身份进入？</div>
+        <label v-for="identity in sseIdentities" :key="identity.id" class="consent-identity">
+          <input v-model="selectedSseIdentity" type="radio" name="sse-identity" :value="identity.id" />
+          <span class="consent-identity-main">
+            <span class="consent-identity-name">{{ identity.name || identity.id }}</span>
+            <span v-if="identity.email" class="consent-identity-email">{{ identity.email }}</span>
+          </span>
+          <span v-if="identity.is_current" class="consent-identity-tag">当前</span>
+        </label>
+      </div>
+
       <div v-if="submitError" class="alert alert-danger consent-error">{{ submitError }}</div>
 
       <button class="btn btn-primary consent-allow" type="button"
@@ -75,7 +87,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api } from '../api'
 import logo from '../assets/logo.png'
@@ -89,9 +101,17 @@ const submitError = ref('')
 const context = ref(null)
 const accounts = ref([])
 const selectedAccountId = ref('')
+const selectedSseIdentity = ref('')
 
 const selectedAccount = computed(() =>
   accounts.value.find((account) => account.id === selectedAccountId.value) || accounts.value[0])
+const sseIdentities = computed(() => selectedAccount.value?.sse_identities || [])
+
+watch(selectedAccount, (account) => {
+  const identities = account?.sse_identities || []
+  const current = identities.find((identity) => identity.is_current)
+  selectedSseIdentity.value = current ? current.id : (identities[0]?.id || '')
+})
 const accountName = computed(() => {
   const account = selectedAccount.value
   return account?.full_name || account?.username || account?.email || '当前账号'
@@ -162,6 +182,7 @@ async function decide(approved) {
         code_challenge_method: request.code_challenge_method,
         nonce: request.nonce,
         as_user_id: selectedAccountId.value,
+        as_sse_identity: sseIdentities.value.length > 1 ? selectedSseIdentity.value : '',
         approved,
         scopes: approved ? (context.value.scopes || []).map((scope) => scope.name) : []
       }
@@ -403,6 +424,53 @@ onMounted(load)
   font-size: 11px;
 }
 .consent-error { margin-top: 16px; }
+.consent-identities {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--line-soft);
+  border-radius: 14px;
+  background: #fbfbfa;
+}
+.consent-identities-label {
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+.consent-identity {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 0;
+  font-size: 12.5px;
+  color: var(--ink);
+  cursor: pointer;
+}
+.consent-identity input { accent-color: var(--brand); }
+.consent-identity-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  overflow: hidden;
+}
+.consent-identity-name { white-space: nowrap; }
+.consent-identity-email {
+  font-size: 11px;
+  color: var(--ink-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.consent-identity-tag {
+  flex: 0 0 auto;
+  padding: 1px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 10.5px;
+  color: var(--ink-faint);
+}
 .consent-allow {
   width: 100%;
   height: 46px;

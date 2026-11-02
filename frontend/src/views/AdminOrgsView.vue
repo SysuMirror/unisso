@@ -2,9 +2,9 @@
   <div>
     <div class="page-head">
       <div>
-        <h1 class="page-title">组织与应用权限</h1>
+        <h1 class="page-title">组织</h1>
         <p class="page-sub">
-          组织只用于管理应用归属与开发者，不进入 OAuth 身份 claims，也不是业务用户组。
+          加入组织后即可在该组织下创建应用。可申请加入，由组织管理员或超级管理员审批。
         </p>
       </div>
       <button v-if="isSuper" class="btn btn-secondary" type="button" @click="showCreate = !showCreate">
@@ -44,23 +44,78 @@
           @click="selectOrg(org)"
         >
           <span>{{ org.name }}</span>
-          <span class="org-chip-meta">{{ roleLabel(org.role) }}</span>
+          <span class="org-chip-meta">{{ chipMeta(org) }}</span>
         </button>
       </div>
 
-      <div class="panel">
+      <div v-if="reviewRequests.length" class="panel join-requests">
         <div class="panel-head">
           <div>
-            <h2 class="panel-title">{{ currentOrg?.name }}</h2>
-            <p class="panel-sub">{{ members.length }} 位成员 · {{ currentOrg?.slug }}</p>
+            <h2 class="panel-title">待审批的加入申请</h2>
+            <p class="panel-sub">通过后申请人将成为组织成员，即可创建应用</p>
           </div>
-          <span class="badge" :class="canAdmin ? 'badge-admin' : 'badge-secondary'">
-            {{ canAdmin ? '可管理' : '仅成员' }}
-          </span>
+          <span class="badge badge-secondary">{{ reviewRequests.length }} 条</span>
+        </div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead>
+              <tr><th>申请人</th><th>邮箱</th><th>组织</th><th>理由</th><th>时间</th><th>操作</th></tr>
+            </thead>
+            <tbody>
+              <tr v-for="r in reviewRequests" :key="r.id">
+                <td>
+                  <div class="cell-ident">
+                    <span class="user-avatar">{{ (r.user.full_name || r.user.username || r.user.email || '?').slice(0, 1).toUpperCase() }}</span>
+                    <div class="cell-ident-text">
+                      <div class="cell-main">{{ r.user.username || r.user.email }}</div>
+                      <div v-if="r.user.full_name" class="cell-sub">{{ r.user.full_name }}</div>
+                    </div>
+                  </div>
+                </td>
+                <td>{{ r.user.email || '-' }}</td>
+                <td>{{ r.organization.name }}</td>
+                <td class="text-secondary request-message">{{ r.message || '—' }}</td>
+                <td class="text-secondary">{{ formatDate(r.created_at) }}</td>
+                <td class="review-actions">
+                  <button class="btn btn-primary btn-sm" type="button" :disabled="busy"
+                          @click="reviewRequest(r, 'approve')">通过</button>
+                  <button class="btn btn-danger btn-sm" type="button" :disabled="busy"
+                          @click="reviewRequest(r, 'reject')">拒绝</button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div v-if="currentOrg" class="panel">
+        <div class="panel-head">
+          <div>
+            <h2 class="panel-title">{{ currentOrg.name }}</h2>
+            <p class="panel-sub">{{ currentOrg.member_count }} 位成员 · {{ currentOrg.slug }}</p>
+          </div>
+          <span class="badge" :class="canAdmin ? 'badge-admin' : 'badge-secondary'">{{ badgeText }}</span>
         </div>
 
-        <div v-if="!canAdmin" class="compact-empty">
-          你不是该组织的管理员，只能查看；请联系组织管理员或超级管理员。
+        <div v-if="!currentOrg.joined" class="join-apply">
+          <p v-if="currentOrg.description" class="join-desc">{{ currentOrg.description }}</p>
+          <div v-if="currentOrg.request_status === 'pending'" class="join-pending">
+            申请已提交（{{ formatDate(myRequest?.created_at) }}），正在等待管理员审批。
+          </div>
+          <template v-else>
+            <div v-if="currentOrg.request_status === 'rejected'" class="join-rejected">
+              上次申请被拒绝<span v-if="myRequest?.review_note">：{{ myRequest.review_note }}</span>，欢迎补充理由后再次申请。
+            </div>
+            <form class="join-form" @submit.prevent="applyJoin">
+              <input v-model.trim="applyMessage" class="form-input" maxlength="160"
+                     placeholder="申请理由（可选，方便管理员了解你）" />
+              <button class="btn btn-primary" type="submit" :disabled="busy">申请加入</button>
+            </form>
+          </template>
+        </div>
+
+        <div v-else-if="!canAdmin" class="compact-empty">
+          你是该组织的{{ roleLabel(currentOrg.role) }}，可以在「应用」页面创建和管理本组织的应用。
         </div>
 
         <template v-else>
@@ -116,14 +171,14 @@
           </div>
 
           <p class="footnote">
-            组织管理员可以设置其他管理员和开发者；开发者可以注册/管理本组织应用。
+            组织管理员可以设置其他管理员和开发者，并审批加入申请；组织成员都可以注册/管理本组织的应用。
             组织不会改变用户在 OAuth 中返回的身份或权限。
           </p>
         </template>
       </div>
     </template>
 
-    <div v-else-if="!loading" class="compact-empty">你还没有加入任何组织。</div>
+    <div v-else-if="!loading" class="compact-empty">还没有任何组织，请联系超级管理员创建。</div>
   </div>
 </template>
 
@@ -134,6 +189,8 @@ import { store } from '../store'
 
 const orgs = ref([])
 const members = ref([])
+const reviewRequests = ref([])
+const myRequests = ref([])
 const selectedId = ref('')
 const isSuper = ref(false)
 const loading = ref(true)
@@ -143,13 +200,28 @@ const notice = ref('')
 const showCreate = ref(false)
 const newOrg = reactive({ name: '', slug: '' })
 const newMember = reactive({ email: '', role: 'member' })
+const applyMessage = ref('')
 
 const me = computed(() => store.user)
 const currentOrg = computed(() => orgs.value.find((o) => o.id === selectedId.value))
 const canAdmin = computed(() => !!currentOrg.value?.can_admin)
+const myRequest = computed(() =>
+  myRequests.value.find((r) => r.organization?.id === selectedId.value))
+const badgeText = computed(() => {
+  const org = currentOrg.value
+  if (!org) return ''
+  if (!org.joined) return '未加入'
+  if (canAdmin.value) return '可管理'
+  return roleLabel(org.role)
+})
 
 const roleLabels = { admin: '管理员', developer: '开发者', member: '成员' }
 const roleLabel = (role) => roleLabels[role] || role
+
+function chipMeta(org) {
+  if (org.joined) return roleLabel(org.role)
+  return org.request_status === 'pending' ? '待审批' : '未加入'
+}
 
 function formatDate(value) {
   if (!value) return ''
@@ -177,11 +249,30 @@ async function loadMembers() {
   members.value = data.members || []
 }
 
+async function loadReviewRequests() {
+  try {
+    const data = await api('/api/org-join-requests')
+    reviewRequests.value = data.requests || []
+  } catch {
+    reviewRequests.value = []
+  }
+}
+
+async function loadMine() {
+  try {
+    const data = await api('/api/org-join-requests/mine')
+    myRequests.value = data.requests || []
+  } catch {
+    myRequests.value = []
+  }
+}
+
 async function selectOrg(org) {
   if (org.id === selectedId.value) return
   selectedId.value = org.id
   error.value = ''
   notice.value = ''
+  applyMessage.value = ''
   loading.value = true
   try {
     if (isSuper.value || org.can_admin) await loadMembers()
@@ -190,6 +281,47 @@ async function selectOrg(org) {
     error.value = e.message
   } finally {
     loading.value = false
+  }
+}
+
+async function applyJoin() {
+  error.value = ''
+  notice.value = ''
+  busy.value = true
+  try {
+    await api(`/api/orgs/${selectedId.value}/join-requests`, {
+      method: 'POST',
+      body: { message: applyMessage.value }
+    })
+    applyMessage.value = ''
+    notice.value = '申请已提交，等待管理员审批。'
+    await Promise.all([loadOrgs(), loadMine()])
+  } catch (e) {
+    error.value = e.message
+  } finally {
+    busy.value = false
+  }
+}
+
+async function reviewRequest(r, action) {
+  if (action === 'reject' &&
+      !window.confirm(`拒绝 ${r.user.full_name || r.user.email} 加入「${r.organization.name}」的申请？`)) return
+  error.value = ''
+  notice.value = ''
+  busy.value = true
+  try {
+    await api(`/api/org-join-requests/${r.id}/review`, {
+      method: 'POST',
+      body: { action }
+    })
+    notice.value = action === 'approve'
+      ? `已通过申请，${r.user.email} 现在是「${r.organization.name}」的成员。`
+      : '已拒绝该申请。'
+    await Promise.all([loadOrgs(), loadReviewRequests(), loadMine()])
+  } catch (e) {
+    error.value = e.message
+  } finally {
+    busy.value = false
   }
 }
 
@@ -276,6 +408,7 @@ onMounted(async () => {
   } finally {
     loading.value = false
   }
+  await Promise.all([loadReviewRequests(), loadMine()])
 })
 </script>
 
@@ -333,6 +466,29 @@ onMounted(async () => {
 }
 .panel-title { margin: 0; font-size: 15px; font-weight: 600; color: var(--ink); }
 .panel-sub { margin: 3px 0 0; font-size: 12px; color: var(--ink-faint); }
+.join-requests { margin-bottom: 20px; }
+.request-message { max-width: 220px; overflow-wrap: anywhere; }
+.review-actions { display: flex; gap: 8px; white-space: nowrap; }
+.join-apply { padding: 18px; }
+.join-desc { margin: 0 0 14px; font-size: 13px; color: var(--ink-soft); }
+.join-pending {
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg-soft, rgba(0, 0, 0, 0.02));
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+.join-rejected {
+  margin-bottom: 12px;
+  padding: 12px 14px;
+  border: 1px solid rgba(180, 60, 50, 0.35);
+  border-radius: 10px;
+  background: rgba(180, 60, 50, 0.06);
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+.join-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }
 .member-add {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 140px auto;
@@ -352,7 +508,7 @@ onMounted(async () => {
 .role-select { width: 130px; padding-top: 4px; padding-bottom: 4px; }
 .footnote { margin: 14px 18px 18px; font-size: 12px; line-height: 1.7; color: var(--ink-faint); }
 @media (max-width: 720px) {
-  .form-row, .member-add { grid-template-columns: 1fr; }
+  .form-row, .member-add, .join-form { grid-template-columns: 1fr; }
   .form-group-action { display: block; }
   .role-select { width: 100%; }
   .footnote { margin: 14px 16px 16px; }

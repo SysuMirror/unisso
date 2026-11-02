@@ -93,18 +93,15 @@ const orgRoles = computed(() => {
     : []
 })
 
+// Any organization member can register apps under their org; members apply
+// to join on the orgs page, so everyone gets that nav entry.
 const canManageApps = computed(() => {
   const user = store.user
   if (!user) return false
-  return user.is_admin || user.is_super_admin ||
-    orgRoles.value.some((role) => role === 'admin' || role === 'developer')
+  return user.is_admin || user.is_super_admin || orgRoles.value.length > 0
 })
 
-const canManageOrgs = computed(() => {
-  const user = store.user
-  if (!user) return false
-  return user.is_super_admin || user.is_admin || orgRoles.value.includes('admin')
-})
+const canManageOrgs = computed(() => !!store.user)
 
 async function logout() {
   mobileMenuOpen.value = false

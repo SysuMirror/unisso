@@ -7,7 +7,11 @@
       </div>
     </div>
 
-    <RouterLink v-if="showFaceTip" to="/profile" class="face-tip">
+    <RouterLink v-if="user.step_up_enabled === false" to="/profile" class="face-tip">
+      建议开启「登录保护」：新设备或长期未登录时增加一次二次验证，账号被盗风险会明显降低。
+      <span>去开启 →</span>
+    </RouterLink>
+    <RouterLink v-else-if="showFaceTip" to="/profile" class="face-tip">
       建议登记人脸：新设备或长期未登录时可以作为二次验证，降低账号丢失风险。
       <span>去登记 →</span>
     </RouterLink>

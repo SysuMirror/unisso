@@ -207,14 +207,14 @@ const scopeCatalog = [
 
 const apps = ref([])
 const organizations = ref([])
+// Any joined organization (admin/developer/member) can host apps now.
 const manageableOrgs = computed(() => organizations.value.filter((org) =>
-  org.can_admin || org.role === 'admin' || org.role === 'developer'))
+  org.can_admin || (org.role && org.role.length > 0) || org.joined))
 const canManageApps = computed(() => {
   const user = store.user
   if (!user) return false
   if (user.is_admin || user.is_super_admin) return true
-  return (user.organizations || []).some((org) =>
-    org.role === 'admin' || org.role === 'developer')
+  return (user.organizations || []).length > 0
 })
 
 function orgName(id) {

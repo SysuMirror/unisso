@@ -72,21 +72,44 @@ void attachDeviceHash(const Request& req, const std::string& deviceHash) {
     Cache::setJson("session:" + *sid, jsonx::dump(data), static_cast<int>(ttl));
 }
 
-// Older sessions were created before device_hash was stored. If exactly one
-// trusted device matches the session's user-agent and login time, associate
-// it so revoking the session can also remove device trust.
+// Older sessions were created before device_hash was stored. Devices are
+// identified by IP (UA alone was too coarse), so match the trusted device
+// whose recorded IP — current or in its known-IP book — equals the session's
+// login IP, created within ±120s. Give up if two different devices match.
 std::string resolveDeviceHash(const std::string& userId, const SessionInfo& info) {
     if (!info.deviceHash.empty()) return info.deviceHash;
-    if (info.userAgent.empty() || info.createdAt.empty()) return "";
+    if (info.ip.empty() || info.createdAt.empty()) return "";
     std::string ts = info.createdAt;
     std::replace(ts.begin(), ts.end(), 'T', ' ');
     if (!ts.empty() && ts.back() == 'Z') ts.pop_back();
     auto rows = Db::query(
-        "SELECT token_hash FROM trusted_devices WHERE user_id=" + Db::quote(userId) +
-        " AND user_agent=" + Db::quote(info.userAgent) +
-        " AND ABS(TIMESTAMPDIFF(SECOND, created_at, " + Db::quote(ts) + ")) <= 120 LIMIT 2");
-    if (rows.size() != 1) return "";
-    return rows.front().at("token_hash");
+        "SELECT token_hash, ip, known_ips FROM trusted_devices WHERE user_id=" +
+        Db::quote(userId) +
+        " AND ABS(TIMESTAMPDIFF(SECOND, created_at, " + Db::quote(ts) + ")) <= 120 LIMIT 20");
+    std::string match;
+    for (const auto& row : rows) {
+        std::string storedIp = row.count("ip") ? row.at("ip") : "";
+        bool hit = !storedIp.empty() && http::sameIp(storedIp, info.ip);
+        if (!hit) {
+            JsonValue known;
+            try { known.fromJson(row.count("known_ips") ? row.at("known_ips") : ""); }
+            catch (...) {}
+            if (known.getType() == JsonValue::ARRAY) {
+                for (const auto& item : known.asArray()) {
+                    if (item.getType() == JsonValue::STRING &&
+                        http::sameIp(item.asString(), info.ip)) {
+                        hit = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if (!hit) continue;
+        const std::string& hash = row.at("token_hash");
+        if (match.empty()) match = hash;
+        else if (match != hash) return "";
+    }
+    return match;
 }
 
 std::string currentDeviceHashForUser(const std::string& userId,

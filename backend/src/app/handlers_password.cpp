@@ -214,6 +214,9 @@ void emailCodeVerify(const Request& req, Response& res) {
     Cache::del(codeKey("email_login", email));
     Cache::del("email_login_attempts:" + digest);
     Cache::del("email_login_cooldown:" + digest);
+    // Holding the mailbox is second-factor quality: keep the IP book of an
+    // already-trusted device current (never creates trust for a new device).
+    authx::noteDeviceIp(user->id, req);
     repo::updateUserLastLogin(user->id);
     std::string session = authx::createSession(
         user->id, user->username.empty() ? user->email : user->username, req);

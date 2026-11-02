@@ -28,9 +28,11 @@ bool canManage(const User& user, const Application& app) {
 
 bool canManageApps(const User& user) {
     if (user.isAdmin || user.isSuperAdmin) return true;
+    // Any organization member may register apps under their org (join first,
+    // then develop) — see appsCreate. Members can apply to join via
+    // org join-requests.
     auto rows = Db::query(
-        "SELECT 1 FROM organization_members WHERE user_id=" + Db::quote(user.id) +
-        " AND role IN ('admin','developer') LIMIT 1");
+        "SELECT 1 FROM organization_members WHERE user_id=" + Db::quote(user.id) + " LIMIT 1");
     if (!rows.empty()) return true;
     auto owned = Db::query(
         "SELECT 1 FROM applications WHERE owner_id=" + Db::quote(user.id) + " LIMIT 1");
@@ -202,9 +204,11 @@ void appsCreate(const Request& req, Response& res) {
     } else {
         auto orgs = Db::query(
             "SELECT organization_id FROM organization_members WHERE user_id=" +
-            Db::quote(user.id) + " AND role IN ('admin','developer') ORDER BY created_at");
+            Db::quote(user.id) +
+            " ORDER BY FIELD(role,'admin','developer','member'), created_at");
         if (orgs.empty()) {
-            http::error(res, 403, "developer_required", "需要组织管理员或开发者权限才能注册应用");
+            http::error(res, 403, "org_member_required",
+                        "请先在「组织」页面申请加入一个组织，通过后即可在该组织下注册应用");
             return;
         }
         bool allowed = false;

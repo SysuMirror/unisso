@@ -11,6 +11,9 @@
 
 #include <crypt.h>
 
+#include <arpa/inet.h>
+#include <netinet/in.h>
+
 #include <algorithm>
 #include <cctype>
 #include <chrono>
@@ -213,6 +216,21 @@ void AppConfig::load() {
     if (csrfOriginsJson.empty() && yamlLoaded) {
         auto origins = yaml.getStringArray("security.csrf_trusted_origins");
         if (!origins.empty()) csrfOriginsJson = JsonValue(origins).toJson();
+    }
+    trustedProxyCidrs.clear();
+    if (yamlLoaded) trustedProxyCidrs = yaml.getStringArray("server.trusted_proxy_cidrs");
+    std::string envCidrs = util::env("UNISSO_TRUSTED_PROXY_CIDRS", "");
+    if (!envCidrs.empty()) {
+        trustedProxyCidrs.clear();
+        for (auto& item : util::split(envCidrs, ',')) {
+            item = util::trim(item);
+            if (!item.empty()) trustedProxyCidrs.push_back(item);
+        }
+    }
+    if (trustedProxyCidrs.empty()) {
+        // Loopback, the k3s pod CIDR, and the relay's docker bridge — the hop
+        // our public entry forwards through. Overridable via env / config.yml.
+        trustedProxyCidrs = {"127.0.0.0/8", "::1", "10.42.0.0/16", "172.18.0.0/16"};
     }
 
     reportUrl = util::env("REPORT_URL", "");
@@ -1027,21 +1045,102 @@ std::vector<std::string> inputArray(const Request& req, const std::string& name)
     return util::split(raw, ',');
 }
 
+namespace {
+
+std::string normalizeIpText(const std::string& value) {
+    std::string ip = util::trim(value);
+    if (ip.size() >= 2 && ip.front() == '[' && ip.back() == ']')
+        ip = ip.substr(1, ip.size() - 2);
+    if (ip.rfind("::ffff:", 0) == 0) ip = ip.substr(7);
+    return ip;
+}
+
+// Parse an address into 16 bytes; IPv4 is stored as v4-in-v6 so the two
+// families compare on equal footing.
+bool ipBytes(const std::string& value, unsigned char out[16]) {
+    std::string ip = normalizeIpText(value);
+    if (ip.empty()) return false;
+    in_addr v4;
+    if (inet_pton(AF_INET, ip.c_str(), &v4) == 1) {
+        std::memset(out, 0, 10);
+        out[10] = 0xff;
+        out[11] = 0xff;
+        std::memcpy(out + 12, &v4.s_addr, 4);
+        return true;
+    }
+    in6_addr v6;
+    if (inet_pton(AF_INET6, ip.c_str(), &v6) == 1) {
+        std::memcpy(out, v6.s6_addr, 16);
+        return true;
+    }
+    return false;
+}
+
+bool ipInCidr(const std::string& ip, const std::string& cidrIn) {
+    std::string cidr = util::trim(cidrIn);
+    if (cidr.empty()) return false;
+    size_t slash = cidr.find('/');
+    std::string base = slash == std::string::npos ? cidr : cidr.substr(0, slash);
+    bool baseV4 = base.find(':') == std::string::npos;
+    int bits = baseV4 ? 32 : 128;
+    if (slash != std::string::npos) {
+        try { bits = std::stoi(cidr.substr(slash + 1)); }
+        catch (...) { return false; }
+    }
+    if (bits < 0 || (baseV4 && bits > 32)) return false;
+    if (bits > 128) bits = 128;
+    int effective = (baseV4 ? 96 : 0) + bits;
+    unsigned char a[16], b[16];
+    if (!ipBytes(ip, a) || !ipBytes(base, b)) return false;
+    for (int i = 0; i < 16; ++i) {
+        int rem = effective - i * 8;
+        if (rem <= 0) break;
+        if (rem >= 8) {
+            if (a[i] != b[i]) return false;
+        } else {
+            unsigned mask = (0xffu << (8 - rem)) & 0xffu;
+            if ((a[i] & mask) != (b[i] & mask)) return false;
+        }
+    }
+    return true;
+}
+
+bool hopTrusted(const std::string& ip) {
+    for (const auto& cidr : AppConfig::get().trustedProxyCidrs) {
+        if (ipInCidr(ip, cidr)) return true;
+    }
+    return false;
+}
+
+}  // namespace
+
 std::string clientIp(const Request& req) {
-    std::string peer = req.remoteAddr;
-    if (peer.rfind("::ffff:", 0) == 0) peer = peer.substr(7);
-    // Only the k3s relay/loopback may supply forwarding headers. A direct
-    // request from any other peer cannot choose its own rate-limit identity.
-    bool trusted = peer.empty() || peer == "10.42.0.1" || peer == "127.0.0.1" || peer == "::1";
-    if (!trusted) return peer;
+    std::string peer = normalizeIpText(req.remoteAddr);
+    // Only proxies inside the trusted CIDR list may supply forwarding headers.
+    // Any other peer cannot choose its own client identity (rate limits,
+    // device trust and audit all key off this value).
+    if (!hopTrusted(peer)) return peer;
     std::string forwarded = header(req, "X-Forwarded-For");
     if (!forwarded.empty()) {
         auto parts = util::split(forwarded, ',');
-        if (!parts.empty()) return util::trim(parts.back());
+        // Walk right-to-left: the first address appended by an untrusted hop
+        // is the client. If every listed hop is trusted, keep the leftmost.
+        for (auto it = parts.rbegin(); it != parts.rend(); ++it) {
+            std::string candidate = normalizeIpText(*it);
+            if (candidate.empty()) continue;
+            if (!hopTrusted(candidate)) return candidate;
+            if (it + 1 == parts.rend()) return candidate;
+        }
     }
-    std::string real = header(req, "X-Real-IP");
+    std::string real = normalizeIpText(header(req, "X-Real-IP"));
     if (!real.empty()) return real;
     return peer;
+}
+
+bool sameIp(const std::string& a, const std::string& b) {
+    unsigned char left[16], right[16];
+    if (!ipBytes(a, left) || !ipBytes(b, right)) return false;
+    return std::memcmp(left, right, 16) == 0;
 }
 
 std::string origin(const Request& req) { return header(req, "Origin"); }
@@ -1139,6 +1238,45 @@ std::string originOf(const std::string& url) {
 
 
 namespace {
+
+// trusted_devices.known_ips is a JSON array of the most recent addresses this
+// browser authenticated from (campus NAT and dual-stack flap would otherwise
+// turn a returning device into a "new device" every few hours).
+std::vector<std::string> knownIpList(const std::string& rawJson) {
+    std::vector<std::string> out;
+    if (rawJson.empty()) return out;
+    JsonValue value;
+    try { value.fromJson(rawJson); } catch (...) {}
+    if (value.getType() == JsonValue::ARRAY) {
+        for (const auto& item : value.asArray()) {
+            if (item.getType() == JsonValue::STRING && !item.asString().empty())
+                out.push_back(item.asString());
+        }
+    }
+    return out;
+}
+
+std::string addKnownIp(const std::string& rawJson, const std::string& ip) {
+    if (ip.empty()) return rawJson;
+    auto list = knownIpList(rawJson);
+    for (const auto& item : list) {
+        if (http::sameIp(item, ip)) return JsonValue(list).toJson();
+    }
+    list.push_back(ip);
+    if (list.size() > 8) list.erase(list.begin());
+    return JsonValue(list).toJson();
+}
+
+bool ipSeenForDevice(const std::string& storedIp, const std::string& knownJson,
+                     const std::string& current) {
+    if (current.empty()) return false;
+    if (!storedIp.empty() && http::sameIp(storedIp, current)) return true;
+    for (const auto& item : knownIpList(knownJson)) {
+        if (http::sameIp(item, current)) return true;
+    }
+    return false;
+}
+
 std::vector<std::string> configStringList(const std::string& raw) {
     std::vector<std::string> out;
     if (raw.empty()) return out;
@@ -1284,14 +1422,43 @@ bool deviceTrusted(const std::string& userId, const Request& req) {
     std::string raw = http::cookie(req, "unisso_device");
     if (raw.empty()) return false;
     auto rows = Db::query(
-        "SELECT id FROM trusted_devices WHERE user_id=" + Db::quote(userId) +
+        "SELECT id, ip, known_ips FROM trusted_devices WHERE user_id=" + Db::quote(userId) +
         " AND token_hash=" + Db::quote(deviceHash(raw)) +
         " AND last_seen_at >= NOW() - INTERVAL " +
         std::to_string(AppConfig::get().trustDeviceDays) + " DAY LIMIT 1");
     if (rows.empty()) return false;
+    const auto& row = rows.front();
+    // The cookie proves which browser this is, the IP proves where it is.
+    // A trusted browser showing up at an address we have never seen it at
+    // counts as a new device and gets the second factor again.
+    if (!ipSeenForDevice(row.count("ip") ? row.at("ip") : "",
+                         row.count("known_ips") ? row.at("known_ips") : "",
+                         http::clientIp(req))) {
+        return false;
+    }
     Db::exec("UPDATE trusted_devices SET last_seen_at=NOW() WHERE id=" +
-             Db::quote(rows.front().at("id")));
+             Db::quote(row.at("id")));
     return true;
+}
+
+void noteDeviceIp(const std::string& userId, const Request& req) {
+    std::string raw = http::cookie(req, "unisso_device");
+    if (raw.empty()) return;
+    auto rows = Db::query(
+        "SELECT id, known_ips FROM trusted_devices WHERE user_id=" + Db::quote(userId) +
+        " AND token_hash=" + Db::quote(deviceHash(raw)) +
+        " AND last_seen_at >= NOW() - INTERVAL " +
+        std::to_string(AppConfig::get().trustDeviceDays) + " DAY LIMIT 1");
+    if (rows.empty()) return;
+    // This login was a second-factor proof in its own right (email code):
+    // refresh the address book of an already-trusted device so the user does
+    // not have to re-verify just because their campus IP rotated.
+    std::string ip = http::clientIp(req);
+    std::string known = addKnownIp(
+        rows.front().count("known_ips") ? rows.front().at("known_ips") : "", ip);
+    Db::exec("UPDATE trusted_devices SET ip=" + Db::nullable(ip) +
+             ", known_ips=" + Db::nullable(known) + ", last_seen_at=NOW() WHERE id=" +
+             Db::quote(rows.front().at("id")));
 }
 
 std::string trustDevice(const std::string& userId, const Request& req, Response& res) {
@@ -1302,18 +1469,20 @@ std::string trustDevice(const std::string& userId, const Request& req, Response&
     auto link = [&](const std::string& token) -> std::string {
         std::string hash = deviceHash(token);
         auto existing = Db::query(
-            "SELECT id FROM trusted_devices WHERE user_id=" + Db::quote(userId) +
+            "SELECT id, known_ips FROM trusted_devices WHERE user_id=" + Db::quote(userId) +
             " AND token_hash=" + Db::quote(hash) + " LIMIT 1");
         if (!existing.empty()) {
+            std::string known = addKnownIp(
+                existing.front().count("known_ips") ? existing.front().at("known_ips") : "", ip);
             Db::exec("UPDATE trusted_devices SET last_seen_at=NOW(), user_agent=" +
-                     Db::nullable(ua) + ", ip=" + Db::nullable(ip) + " WHERE id=" +
-                     Db::quote(existing.front().at("id")));
+                     Db::nullable(ua) + ", ip=" + Db::nullable(ip) + ", known_ips=" +
+                     Db::nullable(known) + " WHERE id=" + Db::quote(existing.front().at("id")));
             return hash;
         }
-        Db::exec("INSERT INTO trusted_devices (id,user_id,token_hash,user_agent,ip,"
+        Db::exec("INSERT INTO trusted_devices (id,user_id,token_hash,user_agent,ip,known_ips,"
                  "created_at,last_seen_at) VALUES (" + Db::quote(util::uuid4()) + "," +
                  Db::quote(userId) + "," + Db::quote(hash) + "," + Db::nullable(ua) + "," +
-                 Db::nullable(ip) + ",NOW(),NOW())");
+                 Db::nullable(ip) + "," + Db::nullable(addKnownIp("", ip)) + ",NOW(),NOW())");
         return hash;
     };
     if (!raw.empty()) {

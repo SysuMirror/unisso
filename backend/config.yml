@@ -6,6 +6,15 @@
 
 server:
   port: 8080
+  # X-Forwarded-For / X-Real-IP are only honored when the connecting hop
+  # itself is one of these addresses/CIDRs. Covers loopback, the k3s pod
+  # network, and the relay's docker bridge (the public entry's hop).
+  # Env override: UNISSO_TRUSTED_PROXY_CIDRS=a,b,c
+  trusted_proxy_cidrs:
+    - 127.0.0.0/8
+    - ::1
+    - 10.42.0.0/16
+    - 172.18.0.0/16
 
 mysql:
   host: mysql.platform-infra.svc.cluster.local

@@ -208,6 +208,18 @@ void oauthContext(const Request& req, Response& res) {
         item["full_name"] = JsonValue(account.fullName);
         item["avatar"] = JsonValue(account.avatar);
         item["is_current"] = JsonValue(account.id == user.id);
+        // Accounts can bind several marketplace identities; the consent page
+        // asks which identity to present (sse_sub claim) when more than one.
+        std::vector<JsonValue> idents;
+        for (const auto& identity : sse::listSseIdentities(account)) {
+            std::map<std::string, JsonValue> entry;
+            entry["id"] = JsonValue(identity.userId);
+            entry["name"] = JsonValue(identity.name);
+            entry["email"] = JsonValue(identity.email);
+            entry["is_current"] = JsonValue(identity.current);
+            idents.push_back(JsonValue(entry));
+        }
+        item["sse_identities"] = JsonValue(idents);
         return JsonValue(item);
     };
     std::vector<JsonValue> accounts;
@@ -289,6 +301,20 @@ void oauthAuthorize(const Request& req, Response& res) {
             http::error(res, 400, "inactive_account", "该账号已停用");
             return;
         }
+    }
+
+    // Which marketplace identity (sse_sub) this grant should present. Only
+    // ids already bound to the selected account may be chosen; empty keeps
+    // the account's current identity.
+    std::string asSse = util::trim(http::input(req, "as_sse_identity"));
+    if (!asSse.empty()) {
+        std::string identityError;
+        if (!sse::selectSseIdentity(selected, asSse, identityError)) {
+            http::error(res, 403, "invalid_sse_identity", "未绑定该集市身份，请重新选择");
+            return;
+        }
+        auto refreshed = repo::findUserById(selected.id);
+        if (refreshed) selected = *refreshed;
     }
 
     if (!repo::upsertConsent(selected.id, app.id, effective)) {

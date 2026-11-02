@@ -102,6 +102,16 @@ std::string avatarExtension(const std::string& contentType, const std::string& d
 
 namespace handlers {
 
+bool loginNeedsStepUp(const User& user, const Request& req, bool allowDeviceMethod) {
+    auto& cfg = AppConfig::get();
+    if (!user.stepUpEnabled) return false;
+    bool hasFace = cfg.faceEnabled && repo::faceCount(user.id) > 0;
+    bool canEmail = cfg.emailAvailable() && deliverableEmail(user.email);
+    bool hasDevice = allowDeviceMethod && authx::hasActiveSession(user.id);
+    if (!hasFace && !canEmail && !hasDevice) return false;  // nothing to ask for
+    return needsStepUp(user, cfg.stepUpDays, authx::deviceTrusted(user.id, req));
+}
+
 void csrfToken(const Request& req, Response& res) {
     std::string token = authx::issueCsrf(req, res);
     std::map<std::string, JsonValue> obj;
@@ -135,10 +145,22 @@ void authLogin(const Request& req, Response& res) {
         sse::Profile profile;
         std::string sseError;
         if (sse::login(email, password, profile, sseError)) {
-            auto sseUser = sse::upsertUser(profile, password);
+            std::string rejectReason;
+            auto sseUser = sse::upsertUser(profile, password, &rejectReason);
             if (sseUser && sseUser->isActive) {
                 user = sseUser;
                 authenticated = true;
+            } else if (!rejectReason.empty()) {
+                // SSE credentials were valid but the bind was refused (this
+                // marketplace id is owned by a different account): a generic
+                // "wrong password" would only confuse the user.
+                recordFailure(email, ip);
+                http::error(res, 403, "sse_bind_conflict",
+                            rejectReason == "sse_already_bound"
+                                ? "该集市账号已绑定其他 UniSSO 账号。请改用「集市账号登录/扫码」以该身份登录，"
+                                  "或先在原账号个人中心解绑。"
+                                : "集市身份绑定失败，请稍后重试或联系管理员。");
+                return;
             }
         } else if (!sseError.empty()) {
             std::cerr << "[sse] login failed for " << email << ": " << sseError << std::endl;
@@ -154,13 +176,7 @@ void authLogin(const Request& req, Response& res) {
     // New devices and long-dormant accounts must pass a second factor before
     // a session is created. The password step is valid, but no session cookie
     // is issued yet.
-    auto& cfg = AppConfig::get();
-    bool hasFace = user && cfg.faceEnabled && repo::faceCount(user->id) > 0;
-    bool canEmail = user && cfg.emailAvailable() && deliverableEmail(user->email);
-    bool hasDevice = user && authx::hasActiveSession(user->id);
-    bool stepUpPossible = hasFace || canEmail || hasDevice;
-    bool trustedDevice = user && authx::deviceTrusted(user->id, req);
-    if (user && stepUpPossible && needsStepUp(*user, cfg.stepUpDays, trustedDevice)) {
+    if (user && loginNeedsStepUp(*user, req)) {
         Cache::del(loginAttemptKey(ip, email));
         beginStepUp(req, res, *user, next);
         return;

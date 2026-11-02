@@ -53,6 +53,9 @@ struct Challenge {
     std::string email;
     std::string next;
     long long expiresAt = 0;
+    // False for challenges born from a scan approval: another logged-in
+    // device must not rubber-stamp a login that device itself just approved.
+    bool deviceAllowed = true;
 };
 
 bool loadChallenge(const Request& req, Response& res, Challenge& out) {
@@ -81,6 +84,7 @@ bool loadChallenge(const Request& req, Response& res, Challenge& out) {
     if (exp != data.end() && exp->second.getType() == JsonValue::NUMBER) {
         out.expiresAt = static_cast<long long>(exp->second.asNumber());
     }
+    out.deviceAllowed = jsonx::getBool(data, "device_allowed", true);
     if (out.userId.empty() || out.expiresAt <= util::nowEpoch()) {
         Cache::del(challengeKey(token));
         http::error(res, 401, "step_up_expired", "二次验证已过期，请重新登录");
@@ -94,12 +98,13 @@ bool loadChallenge(const Request& req, Response& res, Challenge& out) {
 namespace handlers {
 
 void beginStepUp(const Request& req, Response& res, const User& user,
-                 const std::string& next) {
+                 const std::string& next, bool allowDeviceMethod,
+                 std::string* outToken) {
     auto& cfg = AppConfig::get();
     bool emailMethod = cfg.emailAvailable() && !user.email.empty() &&
                        user.email.rfind("@sse.local") == std::string::npos;
     bool faceMethod = cfg.faceEnabled && repo::faceCount(user.id) > 0;
-    bool deviceMethod = authx::hasActiveSession(user.id);
+    bool deviceMethod = allowDeviceMethod && authx::hasActiveSession(user.id);
     std::vector<std::string> methods;
     if (emailMethod) methods.push_back("email");
     if (faceMethod) methods.push_back("face");
@@ -109,10 +114,12 @@ void beginStepUp(const Request& req, Response& res, const User& user,
         return;
     }
     std::string token = util::randomToken(24);
+    if (outToken) *outToken = token;
     std::map<std::string, JsonValue> data;
     data["user_id"] = JsonValue(user.id);
     data["email"] = JsonValue(user.email);
     data["next"] = JsonValue(next.empty() ? "/" : next);
+    data["device_allowed"] = JsonValue(allowDeviceMethod);
     data["created_at"] = jsonx::num(util::nowEpoch());
     data["expires_at"] = jsonx::num(util::nowEpoch() + kChallengeSeconds);
     Cache::setJson(challengeKey(token), jsonx::dump(data), kChallengeSeconds);
@@ -142,7 +149,7 @@ void stepUpMethods(const Request& req, Response& res) {
     bool emailMethod = cfg.emailAvailable() && !user->email.empty() &&
                        user->email.rfind("@sse.local") == std::string::npos;
     bool faceMethod = cfg.faceEnabled && repo::faceCount(user->id) > 0;
-    bool deviceMethod = authx::hasActiveSession(user->id);
+    bool deviceMethod = challenge.deviceAllowed && authx::hasActiveSession(user->id);
     std::vector<std::string> methods;
     if (emailMethod) methods.push_back("email");
     if (faceMethod) methods.push_back("face");
@@ -163,7 +170,7 @@ void stepUpDeviceStart(const Request& req, Response& res) {
         http::error(res, 401, "invalid_account", "账号不可用，请重新登录");
         return;
     }
-    if (!authx::hasActiveSession(challenge.userId)) {
+    if (!challenge.deviceAllowed || !authx::hasActiveSession(challenge.userId)) {
         http::error(res, 409, "no_device", "当前没有其他已登录设备可以确认");
         return;
     }

@@ -52,6 +52,9 @@ struct AppConfig {
     int sessionHours = 24;
     int stepUpDays = 7;
     int trustDeviceDays = 180;
+    // Hops allowed to supply X-Forwarded-For / X-Real-IP. Anything connecting
+    // from outside these ranges cannot choose its own client identity.
+    std::vector<std::string> trustedProxyCidrs;
 
     std::string faceBaseUrl = "https://ai.ssemarket.cn/face";
     std::string faceApiKeyFile = "secrets/face-api.key";
@@ -235,7 +238,7 @@ struct User {
     bool isAdmin = false;
     bool isInternal = false;
     bool isSuperAdmin = false;
-    bool stepUpEnabled = true;
+    bool stepUpEnabled = false;
     std::string sseUserId;
     std::string createdAt;
     std::string updatedAt;
@@ -377,6 +380,8 @@ std::string param(const Request& req, const std::string& name);
 std::string input(const Request& req, const std::string& name);
 std::vector<std::string> inputArray(const Request& req, const std::string& name);
 std::string clientIp(const Request& req);
+// Semantic IPv4/IPv6 comparison ("1.2.3.4" == "::ffff:1.2.3.4").
+bool sameIp(const std::string& a, const std::string& b);
 std::string origin(const Request& req);
 bool secure(const Request& req);
 bool wantsJson(const Request& req);
@@ -414,6 +419,9 @@ void cancelDeviceRequests(const std::string& stepUpToken);
 bool deviceTrusted(const std::string& userId, const Request& req);
 std::string trustDevice(const std::string& userId, const Request& req, Response& res);
 void untrustDevice(const std::string& userId, const Request& req);
+// Refresh the recorded IPs of an already-trusted device without creating
+// new trust (used by logins that are second-factor proofs in their own right).
+void noteDeviceIp(const std::string& userId, const Request& req);
 void destroySession(const Request& req, Response& res);
 std::string issueCsrf(const Request& req, Response& res);
 bool validateCsrf(const Request& req, Response& res);
@@ -473,6 +481,10 @@ void organizationsGet(const Request& req, Response& res);
 void organizationsAddMember(const Request& req, Response& res);
 void organizationsSetMember(const Request& req, Response& res);
 void organizationsRemoveMember(const Request& req, Response& res);
+void organizationsJoinApply(const Request& req, Response& res);
+void orgJoinRequestsMine(const Request& req, Response& res);
+void orgJoinRequestsPending(const Request& req, Response& res);
+void orgJoinRequestReview(const Request& req, Response& res);
 
 void appIntegrationSkill(const Request& req, Response& res);
 void appsList(const Request& req, Response& res);
@@ -496,7 +508,14 @@ void adminUsersCreate(const Request& req, Response& res);
 void adminUsersUpdate(const Request& req, Response& res);
 void adminUsersDelete(const Request& req, Response& res);
 void beginStepUp(const Request& req, Response& res, const User& user,
-                 const std::string& next);
+                 const std::string& next, bool allowDeviceMethod = true,
+                 std::string* outToken = nullptr);
+// Shared gate for every login path (password / QR claim): untrusted device or
+// dormant account on an account that has a second factor available.
+// allowDeviceMethod=false refuses "confirm on another logged-in device" as
+// the factor (a phone that just approved a scan must not approve itself).
+bool loginNeedsStepUp(const User& user, const Request& req,
+                      bool allowDeviceMethod = true);
 void emailCodeStart(const Request& req, Response& res);
 void emailCodeVerify(const Request& req, Response& res);
 void passwordResetStart(const Request& req, Response& res);
@@ -590,8 +609,21 @@ bool registerAccount(const std::string& email, const std::string& password,
                      const std::string& name, const std::string& valiCode,
                      const std::string& cdkey, Profile& profile, std::string& error);
 std::string authorizeUrl(const std::string& state);
-std::optional<User> upsertUser(const Profile& profile, const std::string& password);
+// rejectReason (optional) explains a null return (rare: the SSE id is owned
+// by a different account, or the bind failed): "sse_already_bound" etc.
+std::optional<User> upsertUser(const Profile& profile, const std::string& password,
+                               std::string* rejectReason = nullptr);
 bool bindIdentityToUser(const std::string& userId, const Profile& profile, std::string& error);
+// One UniSSO account can bind several marketplace identities. The active one
+// (users.sse_user_id, surfaced as the sse_sub claim) is always listed first.
+struct SseIdentityOption {
+    std::string userId;
+    std::string name;
+    std::string email;
+    bool current = false;
+};
+std::vector<SseIdentityOption> listSseIdentities(const User& user);
+bool selectSseIdentity(const User& user, const std::string& sseUserId, std::string& error);
 void selfTest();
 }
 

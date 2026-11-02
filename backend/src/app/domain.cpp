@@ -229,8 +229,9 @@ bool loadUserRelations(User& user) {
 bool createUser(const User& user) {
     std::string username = user.username.empty()
         ? "user_" + util::randomHex(4) : user.username;
+    // 2FA is opt-in for normal accounts; admin accounts are seeded with it on.
     std::string sql =
-        "INSERT INTO users (id,email,email_verified,password_hash,username,full_name,student_id,avatar,is_active,is_admin,is_internal,sse_user_id,is_super_admin,created_at,updated_at) VALUES (" +
+        "INSERT INTO users (id,email,email_verified,password_hash,username,full_name,student_id,avatar,is_active,is_admin,is_internal,sse_user_id,is_super_admin,step_up_enabled,created_at,updated_at) VALUES (" +
         Db::quote(user.id) + "," +
         Db::quote(util::lower(util::trim(user.email))) + "," +
         (user.emailVerified ? "1" : "0") + "," +
@@ -243,7 +244,8 @@ bool createUser(const User& user) {
         (user.isAdmin ? "1" : "0") + "," +
         (user.isInternal ? "1" : "0") + "," +
         Db::nullable(user.sseUserId) + "," +
-        (user.isSuperAdmin ? "1" : "0") + ",NOW(),NOW())";
+        (user.isSuperAdmin ? "1" : "0") + "," +
+        ((user.stepUpEnabled || user.isAdmin) ? "1" : "0") + ",NOW(),NOW())";
     return Db::exec(sql) > 0;
 }
 

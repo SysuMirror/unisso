@@ -1,4 +1,5 @@
 #include "core.h"
+#include "app/logger.h"
 
 #include <cstdlib>
 
@@ -321,25 +322,40 @@ std::string authorizeUrl(const std::string& state) {
            "&response_type=code&scope=read_basic&state=" + util::urlEncode(state);
 }
 
-std::optional<User> upsertUser(const Profile& profile, const std::string& password) {
+std::optional<User> upsertUser(const Profile& profile, const std::string& password,
+                               std::string* rejectReason) {
     auto& cfg = AppConfig::get();
     auto existing = repo::findUserBySseId(profile.userId);
+    if (!existing) {
+        // The SSE id may be bound as a secondary identity (an account can
+        // bind several marketplace accounts): ownership still identifies it.
+        auto rows = Db::query(
+            "SELECT user_id FROM user_identities WHERE provider='sse' AND "
+            "provider_user_id=" + Db::quote(profile.userId) + " AND is_active=1 LIMIT 1");
+        if (!rows.empty()) existing = repo::findUserById(rows.front().at("user_id"));
+    }
     if (!existing && !profile.email.empty()) {
         auto byEmail = repo::findUserByEmail(profile.email);
         if (byEmail) {
-            // Never let a marketplace profile silently take over a local
-            // password account or an account already bound to another SSE id.
-            if (!byEmail->sseUserId.empty() && byEmail->sseUserId != profile.userId) {
-                std::cerr << "[sse] refusing email collision for sse_user_id="
-                          << profile.userId << std::endl;
+            // Email match: bind this SSE identity to the account. An external
+            // (email-registered) account is promoted; an account already
+            // bound to a *different* SSE id simply gains another bound
+            // marketplace identity. UniSSO registration, email-code login and
+            // password reset all prove mailbox control, and this email was
+            // just verified by SSE server-side, so binding is safe. The
+            // identity used for this login becomes the active one (primary);
+            // the consent page lets the user pick among bound identities.
+            std::string bindError;
+            if (!bindIdentityToUser(byEmail->id, profile, bindError)) {
+                std::cerr << "[sse] email match but bind refused (" << bindError
+                          << ") sse_user_id=" << profile.userId << std::endl;
+                if (rejectReason) *rejectReason = bindError;
                 return std::nullopt;
             }
-            if (!byEmail->isInternal) {
-                std::cerr << "[sse] local account requires explicit binding: "
-                          << profile.email << std::endl;
-                return std::nullopt;
-            }
-            existing = byEmail;
+            applog::access("[sse] bound sse_user_id=" + profile.userId + " to account " +
+                           byEmail->id + (byEmail->isInternal ? "" : " (promoted external)"));
+            existing = repo::findUserById(byEmail->id);
+            if (!existing) return std::nullopt;
         }
     }
 
@@ -418,12 +434,22 @@ std::optional<User> upsertUser(const Profile& profile, const std::string& passwo
 bool bindIdentityToUser(const std::string& userId, const Profile& profile,
                         std::string& error) {
     if (profile.userId.empty()) { error = "sse_userid_missing"; return false; }
+    // One account may bind several marketplace identities. If a different SSE
+    // id is currently primary, keep it as a bound identity row before the new
+    // one takes over (the consent page lets the user pick which to present).
     auto primary = Db::query("SELECT sse_user_id FROM users WHERE id=" + Db::quote(userId) + " LIMIT 1");
     if (!primary.empty()) {
         std::string current = primary.front().at("sse_user_id");
         if (!current.empty() && current != profile.userId) {
-            error = "sse_primary_mismatch";
-            return false;
+            auto prev = Db::query(
+                "SELECT id FROM user_identities WHERE user_id=" + Db::quote(userId) +
+                " AND provider='sse' AND provider_user_id=" + Db::quote(current) + " LIMIT 1");
+            if (prev.empty()) {
+                Db::exec(
+                    "INSERT INTO user_identities (id,user_id,provider,provider_user_id,"
+                    "is_active,created_at,updated_at) VALUES (" + Db::quote(util::uuid4()) + "," +
+                    Db::quote(userId) + ",'sse'," + Db::quote(current) + ",1,NOW(),NOW())");
+            }
         }
     }
 
@@ -463,7 +489,7 @@ bool bindIdentityToUser(const std::string& userId, const Profile& profile,
 
     Db::exec(
         "UPDATE users SET is_internal=1, "
-        "sse_user_id=IFNULL(NULLIF(sse_user_id,'')," + Db::quote(profile.userId) + "), "
+        "sse_user_id=" + Db::quote(profile.userId) + ", "
         "avatar=COALESCE(NULLIF(avatar,'')," + Db::nullable(profile.avatar) + "), "
         "updated_at=NOW() WHERE id=" + Db::quote(userId));
     Db::exec(
@@ -472,6 +498,49 @@ bool bindIdentityToUser(const std::string& userId, const Profile& profile,
         Db::quote(constants::kDefaultOrganizationId) + "," + Db::quote(userId) +
         ",'member',NOW())");
     return true;
+}
+
+// All SSE ids usable by this account: the active primary plus every active
+// identity row (deduplicated, primary first).
+std::vector<SseIdentityOption> listSseIdentities(const User& user) {
+    std::vector<SseIdentityOption> out;
+    auto push = [&](const std::string& id, const std::string& name,
+                    const std::string& email, bool current) {
+        if (id.empty()) return;
+        for (const auto& item : out) {
+            if (item.userId == id) return;
+        }
+        out.push_back({id, name, email, current || id == user.sseUserId});
+    };
+    push(user.sseUserId, user.fullName, user.email, true);
+    auto rows = Db::query(
+        "SELECT provider_user_id, provider_username, provider_email FROM user_identities "
+        "WHERE user_id=" + Db::quote(user.id) + " AND provider='sse' AND is_active=1 "
+        "ORDER BY updated_at DESC");
+    for (const auto& row : rows) {
+        auto get = [&](const char* key) -> std::string {
+            auto it = row.find(key);
+            return it == row.end() ? "" : it->second;
+        };
+        push(get("provider_user_id"), get("provider_username"), get("provider_email"), false);
+    }
+    return out;
+}
+
+bool selectSseIdentity(const User& user, const std::string& sseUserId, std::string& error) {
+    for (const auto& option : listSseIdentities(user)) {
+        if (option.userId == sseUserId) {
+            if (sseUserId == user.sseUserId) return true;
+            if (Db::exec("UPDATE users SET sse_user_id=" + Db::quote(sseUserId) +
+                         ", updated_at=NOW() WHERE id=" + Db::quote(user.id)) < 0) {
+                error = "switch_failed";
+                return false;
+            }
+            return true;
+        }
+    }
+    error = "identity_not_bound";
+    return false;
 }
 
 void selfTest() {

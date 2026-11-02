@@ -30,11 +30,14 @@ tokens and are not your app's user groups.
 
 ## 2. Register your application
 
-Ask a UniSSO **platform admin, organization admin, or organization developer**
-to register the app in **应用管理** (`https://sso.ssemarket.cn/admin/apps`), or
-use the admin API. Ordinary organization members cannot register OAuth clients.
-The app is owned by the selected organization; org admins/developers can manage
-it.
+Sign in at `https://sso.ssemarket.cn`, join an organization on the **组织** page
+(`https://sso.ssemarket.cn/admin/orgs` — marketplace/集市 accounts auto-join the
+SSE org; others can apply and are approved by the org's admins or platform
+admins), then register the app in **应用管理**
+(`https://sso.ssemarket.cn/admin/apps`) or via the API. **Any organization
+member** may register apps under their org; the app is owned by that
+organization, and org admins/developers can also manage it. You can also ask an
+admin to register it for you.
 
 You need:
 
@@ -177,7 +180,7 @@ session. Do not store the UniSSO access token as your session.
 | `invalid_grant` | code reused/expired, wrong verifier, wrong redirect |
 | userinfo 401 | token expired/revoked, app disabled, user disabled |
 | consent shows an account selector | the user has linked accounts; the chosen account is the identity |
-| `admin_required` when registering an app | only UniSSO admins can create OAuth clients |
+| `org_member_required` when registering an app | join an organization first (组织 page) |
 | introspect `invalid_client` | missing/wrong client credentials, or token belongs to another client |
 
 ## 9. Developer checklist
