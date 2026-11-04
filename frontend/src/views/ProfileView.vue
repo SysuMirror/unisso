@@ -10,147 +10,138 @@
     <div v-if="error" class="alert alert-danger">{{ error }}</div>
     <div v-if="notice" class="alert alert-success">{{ notice }}</div>
 
-    <div v-if="user" class="panel">
-      <section class="section">
-        <div class="section-head">
-          <div>
-            <h2 class="section-title">我的身份</h2>
-            <p class="section-sub">当前登录账号。</p>
-          </div>
-          <div class="tag-row">
-            <span v-if="user.is_internal" class="badge badge-success">学院成员</span>
-            <span v-if="user.is_super_admin" class="badge badge-primary">超级管理员</span>
-          </div>
-        </div>
-
-        <div class="profile-row">
+    <div v-if="user">
+      <section class="phero">
+        <div class="phero-id">
           <div class="avatar avatar-xl">
             <img v-if="user.avatar" :src="user.avatar" alt="" />
             <template v-else>{{ initial }}</template>
           </div>
-          <div class="profile-id">
-            <div class="profile-email">{{ user.email }}</div>
-            <div class="profile-name">{{ user.full_name || user.username || '未设置昵称' }}</div>
-            <div class="profile-actions">
-              <label class="btn btn-secondary btn-sm" style="cursor: pointer;">
-                <input ref="fileInput" type="file" accept="image/*" style="display: none;" @change="uploadAvatar" />
-                {{ uploading ? '上传中…' : '更换头像' }}
-              </label>
-              <button class="btn btn-secondary btn-sm" type="button" @click="openProfileEdit">
-                编辑资料
-              </button>
-              <RouterLink class="btn btn-secondary btn-sm" to="/reset-password">修改密码</RouterLink>
+          <div class="phero-text">
+            <div class="phero-name">{{ user.full_name || user.username || '未设置昵称' }}</div>
+            <div class="phero-mail">{{ user.email }}</div>
+            <div class="phero-meta">
+              <span v-if="user.is_internal" class="badge badge-success">学院成员</span>
+              <span v-if="user.is_super_admin" class="badge badge-primary">超级管理员</span>
+              <span class="badge" :class="user.email_verified ? 'badge-success' : 'badge-secondary'">
+                {{ user.email_verified ? '邮箱已验证' : '邮箱未验证' }}
+              </span>
             </div>
           </div>
         </div>
-
-        <dl class="kv-grid">
-          <div class="kv"><dt>邮箱</dt><dd>{{ user.email }}</dd></div>
-          <div class="kv">
-            <dt>邮箱验证</dt>
-            <dd>
-              <span class="badge" :class="user.email_verified ? 'badge-success' : 'badge-secondary'">
-                {{ user.email_verified ? '已验证' : '未验证' }}
-              </span>
-            </dd>
-          </div>
-          <div class="kv"><dt>显示名</dt><dd>{{ user.full_name || user.username || '未设置' }}</dd></div>
-          <div class="kv"><dt>学号</dt><dd>{{ user.student_id || '未设置' }}</dd></div>
-        </dl>
-
-        <div class="bind-block">
-          <div class="section-head">
-            <div>
-              <h3 class="section-title bind-title">绑定的集市账号</h3>
-              <p class="section-sub">绑定后可用集市身份登录。</p>
-            </div>
-            <button class="btn btn-secondary btn-sm" type="button" @click="startSseBind">绑定集市账号</button>
-          </div>
-          <div v-if="identities.length" class="table-wrap">
-            <table class="table">
-              <thead>
-                <tr><th>账号</th><th>绑定时间</th><th>操作</th></tr>
-              </thead>
-              <tbody>
-                <tr v-for="identity in identities" :key="identity.id">
-                  <td>
-                    <div class="cell-main">{{ identity.provider_username || identity.provider_user_id }}</div>
-                    <div v-if="identity.provider_email" class="cell-sub">{{ identity.provider_email }}</div>
-                  </td>
-                  <td class="text-secondary">{{ formatDate(identity.created_at) }}</td>
-                  <td><button class="btn btn-danger btn-sm" @click="unbind(identity)">解绑</button></td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <div v-else class="compact-empty">暂无绑定的集市账号。</div>
+        <div class="phero-actions">
+          <label class="btn btn-secondary btn-sm" style="cursor: pointer;">
+            <input ref="fileInput" type="file" accept="image/*" style="display: none;" @change="uploadAvatar" />
+            {{ uploading ? '上传中…' : '更换头像' }}
+          </label>
+          <button class="btn btn-secondary btn-sm" type="button" @click="openProfileEdit">编辑资料</button>
+          <RouterLink class="btn btn-secondary btn-sm" to="/reset-password">修改密码</RouterLink>
         </div>
       </section>
 
-      <section class="section">
-        <div class="section-head">
-          <div>
-            <h2 class="section-title">我的权限</h2>
-            <p class="section-sub">第三方应用的授权与自己的接入申请。</p>
-          </div>
-          <button class="btn btn-primary btn-sm" type="button" @click="openApply">申请接入</button>
+      <section class="pmeta">
+        <div class="pmeta-cell">
+          <span class="pmeta-label">显示名</span>
+          <span class="pmeta-value">{{ user.full_name || user.username || '未设置' }}</span>
         </div>
+        <div class="pmeta-cell">
+          <span class="pmeta-label">学号</span>
+          <span class="pmeta-value">{{ user.student_id || '未设置' }}</span>
+        </div>
+        <div class="pmeta-cell">
+          <span class="pmeta-label">集市账号</span>
+          <span class="pmeta-value">{{ identities.length ? '已绑定' : '未绑定' }}</span>
+        </div>
+        <div class="pmeta-cell">
+          <span class="pmeta-label">已授权应用</span>
+          <span class="pmeta-value">{{ consents.length }}</span>
+        </div>
+      </section>
 
-        <h3 class="section-title block-title">已授权的第三方应用</h3>
-        <div v-if="consents.length" class="table-wrap">
-          <table class="table">
-            <thead><tr><th>应用</th><th>权限</th><th>授权时间</th><th>操作</th></tr></thead>
-            <tbody>
-              <tr v-for="consent in consents" :key="consent.id">
-                <td>
-                  <div class="cell-ident">
-                    <img v-if="consent.application?.icon" :src="consent.application.icon" class="app-icon" alt="" />
-                    <span v-else class="app-icon">{{ (consent.application?.name || '?').slice(0, 1) }}</span>
-                    <div class="cell-ident-text">
-                      <div class="cell-main">{{ consent.application?.name || consent.application?.client_id }}</div>
-                    </div>
-                  </div>
-                </td>
-                <td>
-                  <div class="tag-row">
+      <div class="pgrid">
+        <div class="pgrid-main">
+          <section class="psec">
+            <div class="section-head">
+              <div>
+                <h2 class="section-title">授权的应用</h2>
+                <p class="section-sub">这些应用获得的权限，可随时撤销。</p>
+              </div>
+            </div>
+            <div v-if="consents.length" class="pstack">
+              <div v-for="consent in consents" :key="consent.id" class="prow">
+                <img v-if="consent.application?.icon" :src="consent.application.icon" class="app-icon" alt="" />
+                <span v-else class="app-icon">{{ (consent.application?.name || '?').slice(0, 1) }}</span>
+                <div class="prow-main">
+                  <div class="prow-title">{{ consent.application?.name || consent.application?.client_id }}</div>
+                  <div class="prow-sub">
                     <span v-for="scope in consent.scopes" :key="scope" class="tag">{{ scope }}</span>
                   </div>
-                </td>
-                <td class="text-secondary">{{ formatDate(consent.granted_at) }}</td>
-                <td><button class="btn btn-danger btn-sm" type="button" @click="revokeConsent(consent)">撤销授权</button></td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <div v-else class="compact-empty">尚未授权任何第三方应用。</div>
+                </div>
+                <div class="prow-side">
+                  <span class="prow-date">{{ formatDate(consent.granted_at) }} 授权</span>
+                  <button class="btn btn-danger btn-sm" type="button" @click="revokeConsent(consent)">撤销授权</button>
+                </div>
+              </div>
+            </div>
+            <div v-else class="compact-empty">尚未授权任何第三方应用。</div>
+          </section>
 
-        <h3 class="section-title block-title">我的接入申请</h3>
-        <div v-if="myApps.length" class="table-wrap">
-          <table class="table">
-            <thead><tr><th>应用</th><th>类型</th><th>状态</th><th>说明</th></tr></thead>
-            <tbody>
-              <tr v-for="app in myApps" :key="app.id">
-                <td>
-                  <div class="cell-main">{{ app.name }}</div>
-                  <div v-if="app.description" class="cell-sub">{{ app.description }}</div>
-                </td>
-                <td>
+          <section class="psec">
+            <div class="section-head">
+              <div>
+                <h2 class="section-title">我的接入申请</h2>
+                <p class="section-sub">学院成员可申请对外授权应用，由管理员审核。</p>
+              </div>
+              <button class="btn btn-primary btn-sm" type="button" @click="openApply">申请接入</button>
+            </div>
+            <div v-if="myApps.length" class="pstack">
+              <div v-for="app in myApps" :key="app.id" class="prow">
+                <div class="prow-main">
+                  <div class="prow-title">{{ app.name }}</div>
+                  <div v-if="app.description" class="prow-desc">{{ app.description }}</div>
+                </div>
+                <div class="prow-side prow-side-badges">
                   <span class="badge" :class="app.kind === 'external' ? 'badge-secondary' : 'badge-primary'">
                     {{ app.kind === 'external' ? '对外' : '内接' }}
                   </span>
-                </td>
-                <td>
                   <span class="badge" :class="statusClass(app.status)">{{ statusLabel(app.status) }}</span>
-                </td>
-                <td class="text-secondary">{{ app.review_note || '—' }}</td>
-              </tr>
-            </tbody>
-          </table>
+                </div>
+              </div>
+            </div>
+            <div v-else class="compact-empty">还没有提交过接入申请。</div>
+          </section>
         </div>
-        <div v-else class="compact-empty">还没有提交过接入申请。学院成员可申请对外授权应用，由管理员审核。</div>
-      </section>
 
-      <SessionsSection />
+        <aside class="pgrid-side">
+          <section class="psec">
+            <div class="section-head">
+              <div>
+                <h2 class="section-title">集市账号</h2>
+                <p class="section-sub">绑定后可用集市身份登录。</p>
+              </div>
+              <button v-if="!identities.length" class="btn btn-secondary btn-sm" type="button"
+                      @click="startSseBind">绑定</button>
+            </div>
+            <div v-if="identities.length" class="pstack">
+              <div v-for="identity in identities" :key="identity.id" class="prow">
+                <div class="prow-main">
+                  <div class="prow-title">{{ identity.provider_username || identity.provider_user_id }}</div>
+                  <div v-if="identity.provider_email" class="prow-desc">{{ identity.provider_email }}</div>
+                  <div class="prow-date">{{ formatDate(identity.created_at) }} 绑定</div>
+                </div>
+                <div class="prow-side">
+                  <button class="btn btn-danger btn-sm" type="button" @click="unbind(identity)">解绑</button>
+                </div>
+              </div>
+            </div>
+            <div v-else class="compact-empty">暂无绑定的集市账号。</div>
+          </section>
+        </aside>
+      </div>
+
+      <div class="psessions">
+        <SessionsSection />
+      </div>
     </div>
 
     <Modal :open="profileEditOpen" @close="profileEditOpen = false">
@@ -430,28 +421,93 @@ async function unbind(identity) {
 </script>
 
 <style scoped>
-.modal-hint {
-  margin: 0 0 16px;
-  font-size: 12.5px;
-  line-height: 1.7;
+/* Identity hero. */
+.phero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 26px 0 22px;
+  border-bottom: 1px solid var(--line);
+}
+.phero-id { display: flex; align-items: center; gap: 18px; min-width: 0; }
+.phero-name {
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -.045em;
+  line-height: 1.15;
+}
+.phero-mail { margin-top: 3px; font-size: 12.5px; color: var(--ink-soft); word-break: break-all; }
+.phero-meta { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 10px; }
+.phero-actions { display: flex; flex-wrap: wrap; gap: 8px; flex: 0 0 auto; }
+
+/* Meta strip. */
+.pmeta {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border-bottom: 1px solid var(--line);
+}
+.pmeta-cell { padding: 14px 18px; border-right: 1px solid var(--line-soft); min-width: 0; }
+.pmeta-cell:first-child { padding-left: 0; }
+.pmeta-cell:last-child { border-right: 0; }
+.pmeta-label {
+  display: block;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: .14em;
+  text-transform: uppercase;
   color: var(--ink-faint);
 }
-.profile-actions {
+.pmeta-value { display: block; margin-top: 5px; font-size: 12.5px; color: var(--ink); word-break: break-all; }
+
+/* Two-column workspace. */
+.pgrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(280px, .45fr);
+  align-items: start;
+}
+.pgrid-main { padding: 4px 40px 0 0; border-right: 1px solid var(--line); min-width: 0; }
+.pgrid-side { padding: 4px 0 0 40px; min-width: 0; }
+
+.psec { padding: 22px 0; }
+.psec + .psec { border-top: 1px solid var(--line-soft); }
+.psec .section-head { margin-bottom: 12px; }
+
+/* Rows. */
+.pstack { border-top: 1px solid var(--line); }
+.prow {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 12px;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 0;
+  border-bottom: 1px solid var(--line-soft);
 }
-.bind-block {
-  margin-top: 20px;
-  padding-top: 16px;
-  border-top: 1px solid var(--line);
-}
-.bind-title {
-  font-size: 13px;
-}
-.block-title {
-  font-size: 13px;
-  margin: 18px 0 10px;
+.prow:last-child { border-bottom: 0; }
+.prow > .app-icon { flex: 0 0 30px; }
+.prow-main { flex: 1; min-width: 0; }
+.prow-title { font-size: 12.5px; font-weight: 600; color: var(--ink); }
+.prow-sub { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+.prow-desc { margin-top: 2px; font-size: 11px; color: var(--ink-soft); }
+.prow-date { margin-top: 2px; font-size: 10.5px; color: var(--ink-faint); }
+.prow-side { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; flex: 0 0 auto; }
+.prow-side-badges { flex-direction: row; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+
+/* Sessions sits full width under the grid. */
+.psessions { margin-top: 4px; }
+
+@media (max-width: 900px) {
+  .phero { align-items: flex-start; flex-direction: column; gap: 14px; padding: 22px 0 18px; }
+  .phero-name { font-size: 24px; }
+  .phero-actions { width: 100%; }
+  .pmeta { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pmeta-cell { padding: 12px 14px; }
+  .pmeta-cell:nth-child(2n) { border-right: 0; }
+  .pmeta-cell:nth-child(n+3) { border-top: 1px solid var(--line-soft); }
+  .pmeta-cell:first-child { padding-left: 14px; }
+  .pgrid { grid-template-columns: 1fr; }
+  .pgrid-main { border-right: 0; padding-right: 0; }
+  .pgrid-side { padding-left: 0; border-top: 1px solid var(--line); margin-top: 2px; }
+  .prow-side { flex-direction: row; align-items: center; }
+  .prow { flex-wrap: wrap; }
 }
 </style>
