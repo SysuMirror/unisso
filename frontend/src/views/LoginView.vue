@@ -1,6 +1,6 @@
 <template>
   <AuthShell>
-    <form v-if="!qrMode && loginMode === 'password'" class="auth-form" @submit.prevent="submit">
+    <form v-if="!qrMode" class="auth-form" @submit.prevent="submit">
       <div v-if="error" class="auth-error">{{ error }}</div>
 
       <label class="auth-field">
@@ -24,47 +24,7 @@
         {{ loading ? '登录中…' : '登录' }}
       </button>
       <div class="login-links">
-        <button class="auth-alt-link" type="button" @click="switchMode('emailCode')">
-          邮箱验证码登录
-        </button>
         <RouterLink class="auth-alt-link" to="/reset-password">忘记密码？</RouterLink>
-      </div>
-    </form>
-
-    <form v-else-if="!qrMode" class="auth-form" @submit.prevent="submitEmailCode">
-      <div v-if="error" class="auth-error">{{ error }}</div>
-      <div v-if="notice" class="auth-notice">{{ notice }}</div>
-
-      <label class="auth-field">
-        <span>邮箱</span>
-        <input v-model.trim="email" type="email" required autocomplete="email"
-               placeholder="you@example.com" autofocus />
-      </label>
-
-      <p v-if="qrEnabled" class="market-hint">
-        已有集市账号？<button type="button" class="market-hint-link" :disabled="sseJumping"
-               @click="sseDirectLogin">{{ sseJumping ? '正在跳转…' : '直接用集市账号登录' }}</button>，无需验证码。
-      </p>
-
-      <button class="auth-submit auth-submit-secondary" type="button"
-              :disabled="codeSending || codeCooldown > 0 || !email"
-              @click="sendEmailCode">
-        {{ codeSending ? '发送中…' : codeCooldown > 0 ? `${codeCooldown}s 后可重发` : '发送验证码' }}
-      </button>
-
-      <label class="auth-field">
-        <span>验证码</span>
-        <input v-model.trim="code" inputmode="numeric" maxlength="6" required
-               placeholder="6 位验证码" autocomplete="one-time-code" />
-      </label>
-
-      <button class="auth-submit" type="submit" :disabled="loading">
-        {{ loading ? '登录中…' : '验证码登录' }}
-      </button>
-      <div class="login-links">
-        <button class="auth-alt-link" type="button" @click="switchMode('password')">
-          返回密码登录
-        </button>
       </div>
     </form>
 
@@ -149,14 +109,9 @@ const route = useRoute()
 const router = useRouter()
 const email = ref('')
 const password = ref('')
-const code = ref('')
-const loginMode = ref('password')
 const loading = ref(false)
-const codeSending = ref(false)
-const codeCooldown = ref(0)
 const error = ref('')
 const notice = ref('')
-let codeTimer = null
 
 const qrEnabled = ref(false)
 const qrMode = ref(false)
@@ -218,75 +173,6 @@ function safeNext(value) {
   return typeof value === 'string' && value.startsWith('/') && !value.startsWith('//') ? value : '/'
 }
 
-function enterStepUp(data, fallbackNext = '/') {
-  stopPolling()
-  stopCountdown()
-  sessionStorage.setItem('unisso.stepup.token', data.step_up_token || '')
-  sessionStorage.setItem('unisso.stepup.email', data.email_hint || '')
-  sessionStorage.setItem('unisso.stepup.next', safeNext(data.next || fallbackNext))
-  sessionStorage.setItem('unisso.stepup.methods', JSON.stringify(data.methods || ['email']))
-  sessionStorage.setItem('unisso.stepup.trustDays', String(data.trust_days || 180))
-  resetCsrf()
-  router.push('/step-up')
-}
-
-function switchMode(mode) {
-  error.value = ''
-  notice.value = ''
-  loginMode.value = mode
-}
-
-function startCodeCooldown(seconds) {
-  codeCooldown.value = seconds
-  if (codeTimer) clearInterval(codeTimer)
-  codeTimer = setInterval(() => {
-    codeCooldown.value -= 1
-    if (codeCooldown.value <= 0) {
-      clearInterval(codeTimer)
-      codeTimer = null
-    }
-  }, 1000)
-}
-
-async function sendEmailCode() {
-  if (!email.value || codeSending.value || codeCooldown.value > 0) return
-  error.value = ''
-  notice.value = ''
-  codeSending.value = true
-  try {
-    const data = await api('/api/auth/email-code/start', {
-      method: 'POST',
-      body: { email: email.value }
-    })
-    notice.value = '验证码已发送，请查收邮箱。'
-    startCodeCooldown(data?.cooldown || 60)
-  } catch (e) {
-    error.value = e.message
-  } finally {
-    codeSending.value = false
-  }
-}
-
-async function submitEmailCode() {
-  error.value = ''
-  notice.value = ''
-  loading.value = true
-  try {
-    const next = safeNext(route.query.next)
-    const data = await api('/api/auth/email-code/verify', {
-      method: 'POST',
-      body: { email: email.value, code: code.value, next }
-    })
-    resetCsrf()
-    await loadMe(true)
-    router.push(safeNext(data?.next || next))
-  } catch (e) {
-    error.value = e.message
-  } finally {
-    loading.value = false
-  }
-}
-
 async function submit() {
   error.value = ''
   loading.value = true
@@ -296,10 +182,6 @@ async function submit() {
       method: 'POST',
       body: { email: email.value, password: password.value, next }
     })
-    if (data?.step_up_required) {
-      enterStepUp(data, next)
-      return
-    }
     resetCsrf()
     await loadMe(true)
     router.push(safeNext(data?.next || next))
@@ -322,12 +204,6 @@ async function poll() {
     if (qrProvider.value === 'sse') {
       if (!qrState.value) return
       const data = await api('/api/auth/sse/qr/poll?state=' + encodeURIComponent(qrState.value))
-      if (data.step_up_required) {
-        // Scan approved, but this browser/IP is a new device or the account
-        // is dormant: finish on the step-up page before the session exists.
-        enterStepUp(data, '/')
-        return
-      }
       if (data.status === 'authorized') {
         stopPolling()
         resetCsrf()
@@ -342,10 +218,6 @@ async function poll() {
     }
     if (!qrId.value) return
     const data = await api('/api/auth/qr/poll?id=' + encodeURIComponent(qrId.value))
-    if (data.step_up_required) {
-      enterStepUp(data)
-      return
-    }
     if (data.status === 'ok') {
       stopPolling()
       resetCsrf()
@@ -446,7 +318,6 @@ function backToPassword() {
   qrExpired.value = false
   qrDenied.value = false
   qrScanned.value = false
-  loginMode.value = 'password'
 }
 
 onMounted(async () => {
@@ -466,7 +337,6 @@ onMounted(async () => {
 onUnmounted(() => {
   stopPolling()
   stopCountdown()
-  if (codeTimer) clearInterval(codeTimer)
 })
 </script>
 

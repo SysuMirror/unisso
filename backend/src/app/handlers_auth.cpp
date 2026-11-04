@@ -24,25 +24,6 @@ std::string loginAttemptKey(const std::string& ip, const std::string& email) {
     return "login_attempts:" + ip + ":" + (email.empty() ? "-" : email);
 }
 
-bool deliverableEmail(const std::string& email) {
-    size_t at = email.find('@');
-    return at != std::string::npos && email.rfind("@sse.local") == std::string::npos;
-}
-
-bool needsStepUp(const User& user, int days, bool trustedDevice) {
-    if (!user.stepUpEnabled) return false;
-    // A new browser/device is a risk signal on its own.
-    if (!trustedDevice) return true;
-    if (days <= 0) return false;
-    auto rows = Db::query(
-        "SELECT TIMESTAMPDIFF(SECOND,last_login_at,NOW()) AS age FROM users "
-        "WHERE id=" + Db::quote(user.id) + " AND last_login_at IS NOT NULL LIMIT 1");
-    if (rows.empty()) return false;
-    long long age = 0;
-    try { age = std::stoll(rows.front().at("age")); } catch (...) { return false; }
-    return age >= static_cast<long long>(days) * 86400;
-}
-
 bool isLocked(const std::string& email, const std::string& ip, long long& lockedUntil) {
     std::string raw = Cache::get(loginAttemptKey(ip, email));
     if (raw.empty()) return false;
@@ -101,16 +82,6 @@ std::string avatarExtension(const std::string& contentType, const std::string& d
 }  // namespace
 
 namespace handlers {
-
-bool loginNeedsStepUp(const User& user, const Request& req, bool allowDeviceMethod) {
-    auto& cfg = AppConfig::get();
-    if (!user.stepUpEnabled) return false;
-    bool hasFace = cfg.faceEnabled && repo::faceCount(user.id) > 0;
-    bool canEmail = cfg.emailAvailable() && deliverableEmail(user.email);
-    bool hasDevice = allowDeviceMethod && authx::hasActiveSession(user.id);
-    if (!hasFace && !canEmail && !hasDevice) return false;  // nothing to ask for
-    return needsStepUp(user, cfg.stepUpDays, authx::deviceTrusted(user.id, req));
-}
 
 void csrfToken(const Request& req, Response& res) {
     std::string token = authx::issueCsrf(req, res);
@@ -180,17 +151,6 @@ void authLogin(const Request& req, Response& res) {
         return;
     }
 
-    // New devices and long-dormant accounts must pass a second factor before
-    // a session is created. The password step is valid, but no session cookie
-    // is issued yet.
-    if (user && loginNeedsStepUp(*user, req)) {
-        Cache::del(loginAttemptKey(ip, email));
-        beginStepUp(req, res, *user, next);
-        return;
-    }
-    std::string deviceHash;
-    if (user) deviceHash = authx::trustDevice(user->id, req, res);
-
     // One-time sync of the SSE avatar for existing internal accounts. Once an
     // avatar exists (SSE or uploaded), no cross-service call is made.
     if (locallyAuthenticated && user && user->isInternal && user->avatar.empty() &&
@@ -217,7 +177,7 @@ void authLogin(const Request& req, Response& res) {
     Cache::del(loginAttemptKey(ip, email));
     repo::updateUserLastLogin(user->id);
     std::string session = authx::createSession(
-        user->id, user->username.empty() ? email : user->username, req, deviceHash);
+        user->id, user->username.empty() ? email : user->username, req);
     authx::setSessionCookie(res, req, session);
 
     auto fresh = repo::findUserById(user->id);

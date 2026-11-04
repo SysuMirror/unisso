@@ -48,7 +48,6 @@ User mapUser(const std::map<std::string, std::string>& row) {
     user.isAdmin = isTrue(get("is_admin"));
     user.isInternal = isTrue(get("is_internal"));
     user.isSuperAdmin = isTrue(get("is_super_admin"));
-    user.stepUpEnabled = isTrue(get("step_up_enabled"));
     user.sseUserId = get("sse_user_id");
     user.createdAt = get("created_at");
     user.updatedAt = get("updated_at");
@@ -75,8 +74,12 @@ Application mapApplication(const std::map<std::string, std::string>& row) {
     app.isActive = isTrue(get("is_active"));
     app.isConfidential = isTrue(get("is_confidential"));
     app.m2mEnabled = isTrue(get("m2m_enabled"));
+    app.kind = get("kind").empty() ? "internal" : get("kind");
+    app.status = get("status").empty() ? "approved" : get("status");
+    app.reviewedBy = get("reviewed_by");
+    app.reviewedAt = get("reviewed_at");
+    app.reviewNote = get("review_note");
     app.ownerId = get("owner_id");
-    app.organizationId = get("organization_id");
     app.createdAt = get("created_at");
     app.updatedAt = get("updated_at");
     return app;
@@ -147,45 +150,6 @@ std::optional<User> findUserBySseId(const std::string& sseUserId) {
 }
 
 
-int faceCount(const std::string& userId) {
-    auto rows = Db::query("SELECT COUNT(*) AS c FROM user_faces WHERE user_id=" +
-                          Db::quote(userId));
-    if (rows.empty()) return 0;
-    try { return std::stoi(rows.front().at("c")); } catch (...) { return 0; }
-}
-
-std::vector<User> linkedPeers(const std::string& userId) {
-    std::vector<User> result;
-    auto rows = Db::query(
-        "SELECT u.* FROM account_peer_links l JOIN users u ON u.id=CASE "
-        "WHEN l.user_a_id=" + Db::quote(userId) + " THEN l.user_b_id ELSE l.user_a_id END "
-        "WHERE l.user_a_id=" + Db::quote(userId) + " OR l.user_b_id=" +
-        Db::quote(userId) + " ORDER BY l.created_at");
-    for (const auto& row : rows) result.push_back(mapUser(row));
-    return result;
-}
-
-std::vector<JsonValue> linkedAccountsJson(const std::string& userId) {
-    std::vector<JsonValue> result;
-    auto rows = Db::query(
-        "SELECT u.id,u.email,u.username,u.full_name,l.id AS link_id,l.created_at "
-        "FROM account_peer_links l JOIN users u ON u.id=CASE "
-        "WHEN l.user_a_id=" + Db::quote(userId) + " THEN l.user_b_id ELSE l.user_a_id END "
-        "WHERE l.user_a_id=" + Db::quote(userId) + " OR l.user_b_id=" +
-        Db::quote(userId) + " ORDER BY l.created_at");
-    for (const auto& row : rows) {
-        std::map<std::string, JsonValue> item;
-        item["id"] = JsonValue(row.at("id"));
-        item["email"] = JsonValue(row.at("email"));
-        item["username"] = JsonValue(row.count("username") ? row.at("username") : "");
-        item["full_name"] = JsonValue(row.count("full_name") ? row.at("full_name") : "");
-        item["link_id"] = JsonValue(row.at("link_id"));
-        item["linked_at"] = JsonValue(row.at("created_at"));
-        result.push_back(JsonValue(item));
-    }
-    return result;
-}
-
 std::vector<User> listUsers() {
     std::vector<User> users;
     auto rows = Db::query("SELECT * FROM users ORDER BY created_at DESC");
@@ -198,53 +162,15 @@ std::vector<User> listUsers() {
 }
 
 bool loadUserRelations(User& user) {
-    user.organizations.clear();
-    auto orgRows = Db::query(
-        "SELECT o.id,o.name,o.slug,om.role FROM organization_members om "
-        "JOIN organizations o ON o.id=om.organization_id WHERE om.user_id=" +
-        Db::quote(user.id) + " ORDER BY o.name");
-    for (const auto& row : orgRows) {
-        OrgRef org;
-        auto pick = [&row](const char* key) {
-            auto it = row.find(key);
-            return it == row.end() ? std::string() : it->second;
-        };
-        org.id = pick("id");
-        org.name = pick("name");
-        org.slug = pick("slug");
-        org.role = pick("role");
-        user.organizations.push_back(std::move(org));
-    }
-
-    auto roles = Db::query(
-        "SELECT r.name FROM roles r JOIN user_roles ur ON ur.role_id=r.id "
-        "WHERE ur.user_id=" + Db::quote(user.id) + " ORDER BY r.name");
-    user.roles.clear();
-    for (const auto& row : roles) {
-        auto it = row.find("name");
-        if (it != row.end() && !it->second.empty()) user.roles.push_back(it->second);
-    }
     user.identities = listIdentities(user.id);
-
-    auto assignments = Db::query(
-        "SELECT role FROM role_assignments WHERE "
-        "(subject_type='user' AND subject_id=" + Db::quote(user.id) + ") OR "
-        "(subject_type='sse_user_id' AND subject_id=" + Db::quote(user.sseUserId) + ")");
-    for (const auto& row : assignments) {
-        if (row.count("role") && row.at("role") == "super_admin") {
-            user.isSuperAdmin = true;
-            user.isAdmin = true;
-        }
-    }
     return true;
 }
 
 bool createUser(const User& user) {
     std::string username = user.username.empty()
         ? "user_" + util::randomHex(4) : user.username;
-    // 2FA is opt-in for normal accounts; admin accounts are seeded with it on.
     std::string sql =
-        "INSERT INTO users (id,email,email_verified,password_hash,username,full_name,student_id,avatar,is_active,is_admin,is_internal,sse_user_id,is_super_admin,step_up_enabled,created_at,updated_at) VALUES (" +
+        "INSERT INTO users (id,email,email_verified,password_hash,username,full_name,student_id,avatar,is_active,is_admin,is_internal,sse_user_id,is_super_admin,created_at,updated_at) VALUES (" +
         Db::quote(user.id) + "," +
         Db::quote(util::lower(util::trim(user.email))) + "," +
         (user.emailVerified ? "1" : "0") + "," +
@@ -257,8 +183,7 @@ bool createUser(const User& user) {
         (user.isAdmin ? "1" : "0") + "," +
         (user.isInternal ? "1" : "0") + "," +
         Db::nullable(user.sseUserId) + "," +
-        (user.isSuperAdmin ? "1" : "0") + "," +
-        ((user.stepUpEnabled || user.isAdmin) ? "1" : "0") + ",NOW(),NOW())";
+        (user.isSuperAdmin ? "1" : "0") + ",NOW(),NOW())";
     return Db::exec(sql) > 0;
 }
 
@@ -278,6 +203,14 @@ std::vector<Application> listApplications() {
     return out;
 }
 
+std::vector<Application> listApplicationsByStatus(const std::string& status) {
+    std::vector<Application> out;
+    auto rows = Db::query("SELECT * FROM applications WHERE status=" + Db::quote(status) +
+                          " ORDER BY created_at ASC LIMIT 100");
+    for (const auto& row : rows) out.push_back(mapApplication(row));
+    return out;
+}
+
 std::optional<Application> findApplicationByClientId(const std::string& clientId) {
     auto rows = Db::query("SELECT * FROM applications WHERE client_id=" + Db::quote(clientId) + " LIMIT 1");
     if (rows.empty()) return std::nullopt;
@@ -290,22 +223,10 @@ std::optional<Application> findApplicationById(const std::string& id) {
     return mapApplication(rows.front());
 }
 
-std::vector<Application> listApplicationsOwnedBy(const std::string& userId) {
+std::vector<Application> listApplicationsForUser(const std::string& userId) {
     std::vector<Application> out;
     auto rows = Db::query("SELECT * FROM applications WHERE owner_id=" + Db::quote(userId) +
                           " ORDER BY created_at DESC");
-    for (const auto& row : rows) out.push_back(mapApplication(row));
-    return out;
-}
-
-std::vector<Application> listApplicationsForUser(const std::string& userId) {
-    std::vector<Application> out;
-    auto rows = Db::query(
-        "SELECT DISTINCT a.* FROM applications a "
-        "LEFT JOIN organization_members om ON om.organization_id=a.organization_id "
-        "AND om.user_id=" + Db::quote(userId) +
-        " WHERE a.owner_id=" + Db::quote(userId) +
-        " OR om.role IN ('admin','developer') ORDER BY a.created_at DESC");
     for (const auto& row : rows) out.push_back(mapApplication(row));
     return out;
 }
@@ -422,32 +343,12 @@ JsonValue userJson(const User& user, bool withRelations) {
     obj["is_admin"] = JsonValue(user.isAdmin);
     obj["is_internal"] = JsonValue(user.isInternal);
     obj["is_super_admin"] = JsonValue(user.isSuperAdmin);
-    obj["step_up_enabled"] = JsonValue(user.stepUpEnabled);
     obj["created_at"] = JsonValue(user.createdAt);
     obj["last_login_at"] = JsonValue(user.lastLoginAt);
     if (withRelations) {
-        std::vector<JsonValue> roles;
-        for (const auto& role : user.roles) {
-            std::map<std::string, JsonValue> item;
-            item["name"] = JsonValue(role);
-            roles.push_back(JsonValue(item));
-        }
-        obj["roles"] = JsonValue(roles);
         std::vector<JsonValue> identities;
         for (const auto& identity : user.identities) identities.push_back(identityJson(identity));
         obj["identities"] = JsonValue(identities);
-
-        std::vector<JsonValue> orgs;
-        for (const auto& org : user.organizations) {
-            std::map<std::string, JsonValue> item;
-            item["id"] = JsonValue(org.id);
-            item["name"] = JsonValue(org.name);
-            item["slug"] = JsonValue(org.slug);
-            item["role"] = JsonValue(org.role);
-            orgs.push_back(JsonValue(item));
-        }
-        obj["organizations"] = JsonValue(orgs);
-        obj["linked_accounts"] = JsonValue(linkedAccountsJson(user.id));
     }
     return JsonValue(obj);
 }
@@ -467,8 +368,10 @@ JsonValue applicationJson(const Application& app, bool withSecret) {
     obj["is_active"] = JsonValue(app.isActive);
     obj["is_confidential"] = JsonValue(app.isConfidential);
     obj["m2m_enabled"] = JsonValue(app.m2mEnabled);
+    obj["kind"] = JsonValue(app.kind);
+    obj["status"] = JsonValue(app.status);
+    obj["review_note"] = JsonValue(app.reviewNote);
     obj["owner_id"] = JsonValue(app.ownerId);
-    obj["organization_id"] = JsonValue(app.organizationId);
     obj["created_at"] = JsonValue(app.createdAt);
     return JsonValue(obj);
 }

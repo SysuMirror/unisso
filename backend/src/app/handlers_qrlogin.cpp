@@ -134,24 +134,9 @@ void qrLoginPoll(const Request& req, Response& res) {
         return;
     }
     std::string next = safeNextPath(jsonx::getString(rec, "next", "/"));
-    // A scan is only as strong as the phone session behind it. New device /
-    // dormant accounts must still pass a second factor on the desktop.
-    // allowDeviceMethod=false: the phone that just approved the scan must not
-    // also serve as the "other logged-in device" confirming it.
-    if (loginNeedsStepUp(*user, req, false)) {
-        Cache::del("qr_login:" + id);
-        Cache::del("qr_login_claim:" + id);
-        applog::access("[qr] step-up required before claim user=" + user->id);
-        beginStepUp(req, res, *user, next, false);
-        return;
-    }
-    std::string deviceHash;
-    if (authx::deviceTrusted(user->id, req)) {
-        deviceHash = authx::deviceHash(http::cookie(req, "unisso_device"));
-    }
     repo::updateUserLastLogin(user->id);
     std::string session = authx::createSession(
-        user->id, user->username.empty() ? user->email : user->username, req, deviceHash);
+        user->id, user->username.empty() ? user->email : user->username, req);
     authx::setSessionCookie(res, req, session);
     Cache::del("qr_login:" + id);
     Cache::del("qr_login_claim:" + id);

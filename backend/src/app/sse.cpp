@@ -425,16 +425,6 @@ std::optional<User> upsertUser(const Profile& profile, const std::string& passwo
         "ON DUPLICATE KEY UPDATE email=VALUES(email), name=VALUES(name), "
         "identity=VALUES(identity), is_internal=1, last_verified_at=NOW(), updated_at=NOW()");
 
-    const std::string org = constants::kDefaultOrganizationId;
-    Db::exec(
-        "INSERT IGNORE INTO organization_members (id,organization_id,user_id,role,created_at) "
-        "VALUES (" + Db::quote(util::uuid4()) + "," + Db::quote(org) + "," +
-        Db::quote(existing->id) + ",'member',NOW())");
-    if (superAdmin) {
-        Db::exec("UPDATE organization_members SET role='admin' WHERE organization_id=" +
-                 Db::quote(org) + " AND user_id=" + Db::quote(existing->id));
-    }
-
     if (!profile.email.empty()) {
         std::map<std::string, JsonValue> cache;
         cache["sse_user_id"] = JsonValue(profile.userId);
@@ -510,11 +500,6 @@ bool bindIdentityToUser(const std::string& userId, const Profile& profile,
         "sse_user_id=" + Db::quote(profile.userId) + ", "
         "avatar=COALESCE(NULLIF(avatar,'')," + Db::nullable(profile.avatar) + "), "
         "updated_at=NOW() WHERE id=" + Db::quote(userId));
-    Db::exec(
-        "INSERT IGNORE INTO organization_members (id,organization_id,user_id,role,created_at) "
-        "VALUES (" + Db::quote(util::uuid4()) + "," +
-        Db::quote(constants::kDefaultOrganizationId) + "," + Db::quote(userId) +
-        ",'member',NOW())");
     return true;
 }
 

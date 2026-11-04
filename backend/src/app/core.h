@@ -17,11 +17,6 @@
 // Configuration (environment first, sensible defaults)
 // ===========================================================================
 
-namespace constants {
-inline constexpr const char* kDefaultOrganizationId =
-    "00000000-0000-0000-0000-000000000001";
-}
-
 struct AppConfig {
     int port = 8080;
     std::string issuer = "https://sso.ssemarket.cn";
@@ -50,19 +45,9 @@ struct AppConfig {
     int idTokenMinutes = 60;
     int authCodeSeconds = 600;
     int sessionHours = 24;
-    int stepUpDays = 7;
-    int trustDeviceDays = 180;
     // Hops allowed to supply X-Forwarded-For / X-Real-IP. Anything connecting
     // from outside these ranges cannot choose its own client identity.
     std::vector<std::string> trustedProxyCidrs;
-
-    std::string faceBaseUrl = "https://ai.ssemarket.cn/face";
-    std::string faceApiKeyFile = "secrets/face-api.key";
-    std::string faceApiKey;
-    bool faceEnabled = false;
-    double faceLoginThreshold = 0.6;
-    double faceBindThreshold = 0.5;
-    int faceTimeoutSeconds = 30;
 
     bool emailRegistrationEnabled = false;
     std::string smtpHost;
@@ -206,13 +191,6 @@ public:
 // Domain models
 // ===========================================================================
 
-struct OrgRef {
-    std::string id;
-    std::string name;
-    std::string slug;
-    std::string role;
-};
-
 struct Identity {
     std::string id;
     std::string userId;
@@ -238,14 +216,11 @@ struct User {
     bool isAdmin = false;
     bool isInternal = false;
     bool isSuperAdmin = false;
-    bool stepUpEnabled = false;
     std::string sseUserId;
     std::string createdAt;
     std::string updatedAt;
     std::string lastLoginAt;
-    std::vector<std::string> roles;
     std::vector<Identity> identities;
-    std::vector<OrgRef> organizations;
 };
 
 struct Application {
@@ -261,11 +236,17 @@ struct Application {
     std::string callbackUrl;
     bool isActive = true;
     bool isConfidential = true;
+    // internal = first-party platform (silent SSO, m2m eligible); external =
+    // third-party OAuth application registered through the review flow.
+    std::string kind = "internal";
+    std::string status = "approved";
+    std::string reviewedBy;
+    std::string reviewedAt;
+    std::string reviewNote;
     // Whether platforms may call POST /api/oauth/password/verify with this
     // client for silent SSO. Managed from the admin console.
     bool m2mEnabled = false;
     std::string ownerId;
-    std::string organizationId;
     std::string createdAt;
     std::string updatedAt;
 };
@@ -292,9 +273,9 @@ bool updateUserPassword(const std::string& userId, const std::string& passwordHa
 bool updateUserLastLogin(const std::string& userId);
 
 std::vector<Application> listApplications();
+std::vector<Application> listApplicationsByStatus(const std::string& status);
 std::optional<Application> findApplicationByClientId(const std::string& clientId);
 std::optional<Application> findApplicationById(const std::string& id);
-std::vector<Application> listApplicationsOwnedBy(const std::string& userId);
 std::vector<Application> listApplicationsForUser(const std::string& userId);
 
 std::optional<Consent> findConsent(const std::string& userId, const std::string& applicationId);
@@ -304,9 +285,6 @@ bool upsertConsent(const std::string& userId, const std::string& applicationId,
 bool revokeConsent(const std::string& userId, const std::string& applicationId);
 
 std::vector<Identity> listIdentities(const std::string& userId);
-int faceCount(const std::string& userId);
-std::vector<User> linkedPeers(const std::string& userId);
-std::vector<JsonValue> linkedAccountsJson(const std::string& userId);
 bool bindIdentity(const Identity& identity);
 bool unbindIdentity(const std::string& userId, const std::string& identityId);
 
@@ -418,15 +396,6 @@ bool requireUser(const Request& req, Response& res, User& out);
 bool requireAdmin(const Request& req, Response& res, User& out);
 bool requireSuperAdmin(const Request& req, Response& res, User& out);
 void setSessionCookie(Response& res, const Request& req, const std::string& session);
-std::string deviceHash(const std::string& token);
-bool hasActiveSession(const std::string& userId);
-void cancelDeviceRequests(const std::string& stepUpToken);
-bool deviceTrusted(const std::string& userId, const Request& req);
-std::string trustDevice(const std::string& userId, const Request& req, Response& res);
-void untrustDevice(const std::string& userId, const Request& req);
-// Refresh the recorded IPs of an already-trusted device without creating
-// new trust (used by logins that are second-factor proofs in their own right).
-void noteDeviceIp(const std::string& userId, const Request& req);
 void destroySession(const Request& req, Response& res);
 std::string issueCsrf(const Request& req, Response& res);
 bool validateCsrf(const Request& req, Response& res);
@@ -483,17 +452,6 @@ void oauthSessionRevoke(const Request& req, Response& res);
 void oidcDiscovery(const Request& req, Response& res);
 void oidcJwks(const Request& req, Response& res);
 
-void organizationsList(const Request& req, Response& res);
-void organizationsCreate(const Request& req, Response& res);
-void organizationsGet(const Request& req, Response& res);
-void organizationsAddMember(const Request& req, Response& res);
-void organizationsSetMember(const Request& req, Response& res);
-void organizationsRemoveMember(const Request& req, Response& res);
-void organizationsJoinApply(const Request& req, Response& res);
-void orgJoinRequestsMine(const Request& req, Response& res);
-void orgJoinRequestsPending(const Request& req, Response& res);
-void orgJoinRequestReview(const Request& req, Response& res);
-
 void appIntegrationSkill(const Request& req, Response& res);
 void appsList(const Request& req, Response& res);
 void appsCreate(const Request& req, Response& res);
@@ -502,6 +460,9 @@ void appsUpdate(const Request& req, Response& res);
 void appsDelete(const Request& req, Response& res);
 void appsResetSecret(const Request& req, Response& res);
 void appsIcon(const Request& req, Response& res);
+void appsApply(const Request& req, Response& res);
+void appsPending(const Request& req, Response& res);
+void appsReview(const Request& req, Response& res);
 
 void consentsList(const Request& req, Response& res);
 void consentsUpdate(const Request& req, Response& res);
@@ -515,42 +476,11 @@ void adminUsersList(const Request& req, Response& res);
 void adminUsersCreate(const Request& req, Response& res);
 void adminUsersUpdate(const Request& req, Response& res);
 void adminUsersDelete(const Request& req, Response& res);
-void beginStepUp(const Request& req, Response& res, const User& user,
-                 const std::string& next, bool allowDeviceMethod = true,
-                 std::string* outToken = nullptr);
-// Shared gate for every login path (password / QR claim): untrusted device or
-// dormant account on an account that has a second factor available.
-// allowDeviceMethod=false refuses "confirm on another logged-in device" as
-// the factor (a phone that just approved a scan must not approve itself).
-bool loginNeedsStepUp(const User& user, const Request& req,
-                      bool allowDeviceMethod = true);
-void emailCodeStart(const Request& req, Response& res);
-void emailCodeVerify(const Request& req, Response& res);
 void passwordResetStart(const Request& req, Response& res);
 void passwordResetConfirm(const Request& req, Response& res);
-void stepUpMethods(const Request& req, Response& res);
-void stepUpDeviceStart(const Request& req, Response& res);
-void stepUpDeviceStatus(const Request& req, Response& res);
-void stepUpDevicePending(const Request& req, Response& res);
-void stepUpDeviceDecide(const Request& req, Response& res);
-void stepUpSendEmail(const Request& req, Response& res);
 void sessionsList(const Request& req, Response& res);
 void sessionRevoke(const Request& req, Response& res);
 void sessionRevokeOthers(const Request& req, Response& res);
-void deviceTrustStatus(const Request& req, Response& res);
-void deviceTrustSet(const Request& req, Response& res);
-void stepUpVerify(const Request& req, Response& res);
-void stepUpCancel(const Request& req, Response& res);
-void faceStatus(const Request& req, Response& res);
-void facesList(const Request& req, Response& res);
-void faceSession(const Request& req, Response& res);
-void faceProbe(const Request& req, Response& res);
-void faceSendCode(const Request& req, Response& res);
-void faceConfirm(const Request& req, Response& res);
-void faceEnroll(const Request& req, Response& res);
-void faceUnbind(const Request& req, Response& res);
-void stepUpFaceSession(const Request& req, Response& res);
-void stepUpFaceVerify(const Request& req, Response& res);
 void clientLog(const Request& req, Response& res);
 void adminLogsList(const Request& req, Response& res);
 void adminLogsTail(const Request& req, Response& res);
@@ -562,42 +492,9 @@ void avatarUpload(const Request& req, Response& res);
 // SPA/static fallback installed as the server's not-found handler.
 bool spaFallback(const Request& req, Response& res);
 
-// Idempotent schema upgrades (organizations, groups, SSE, roles).
+// Idempotent schema upgrades.
 namespace migrations {
 void run();
-}
-
-// Face service (liveness + 1:N + enrollment). Only used for the second factor
-// and explicit enrollment; there is no face-only login.
-namespace face {
-struct LivenessSession {
-    std::string sessionId;
-    std::string challenge;
-    int expiresIn = 120;
-    int minFrames = 3;
-    int maxFrames = 8;
-};
-struct Match {
-    std::string providerPersonId;
-    std::string externalId;
-    double score = 0.0;
-};
-struct LiveResult {
-    bool passed = false;
-    int bestFrame = -1;
-    std::string challenge;
-    std::vector<Match> candidates;
-    Match match;
-};
-bool createLivenessSession(LivenessSession& out, std::string& error);
-bool recognizeLive(const std::string& sessionId,
-                   const std::vector<std::string>& frames, double minScore,
-                   LiveResult& out, std::string& error);
-bool enrollLive(const std::string& sessionId, const std::string& externalId,
-                const std::string& name, const std::vector<std::string>& frames,
-                std::string& providerPersonId, std::string& error);
-bool deletePerson(const std::string& providerPersonId, std::string& error);
-bool deletePersonByExternalId(const std::string& externalId, std::string& error);
 }
 
 // SSE Market (院内侧) account-password login adapter.
@@ -648,10 +545,6 @@ void qrLoginDetail(const Request& req, Response& res);
 void qrLoginConfirm(const Request& req, Response& res);
 void qrLoginDeny(const Request& req, Response& res);
 void accountUpdateProfile(const Request& req, Response& res);
-void accountLinksList(const Request& req, Response& res);
-void accountLinkSendCode(const Request& req, Response& res);
-void accountLinkBind(const Request& req, Response& res);
-void accountLinkUnbind(const Request& req, Response& res);
 }
 
 // Infrastructure services started once at boot.

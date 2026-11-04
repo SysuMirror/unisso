@@ -95,24 +95,6 @@ void revokeUserSessions(const std::string& userId) {
     }
 }
 
-void revokeUserStepUps(const std::string& userId) {
-    for (const auto& name : Cache::scan("step_up:*", 500)) {
-        if (name.rfind("step_up:", 0) != 0) continue;
-        std::string raw = Cache::get(name);
-        if (raw.empty()) continue;
-        std::map<std::string, JsonValue> data;
-        if (!jsonx::parseObject(raw, data)) continue;
-        if (jsonx::getString(data, "user_id") != userId) continue;
-        std::string token = name.substr(8);
-        Cache::del("step_up:" + token);
-        Cache::del("step_up_code:" + token);
-        Cache::del("step_up_attempts:" + token);
-        Cache::del("step_up_send_total:" + token);
-        Cache::del("step_up_send_cooldown:" + token);
-        Cache::del("step_up_face_attempts:" + token);
-        authx::cancelDeviceRequests(token);
-    }
-}
 
 bool readCodeRecord(const std::string& kind, const std::string& email,
                     const std::string& code, std::string& userId,
@@ -142,93 +124,6 @@ bool readCodeRecord(const std::string& kind, const std::string& email,
 
 namespace handlers {
 
-void emailCodeStart(const Request& req, Response& res) {
-    std::string email = normalizeEmail(http::input(req, "email"));
-    if (!validEmail(email)) {
-        http::error(res, 400, "invalid_email", "邮箱格式不正确");
-        return;
-    }
-    auto& cfg = AppConfig::get();
-    if (!cfg.emailAvailable()) {
-        http::error(res, 503, "email_unavailable", "邮箱验证码登录暂不可用");
-        return;
-    }
-    std::string errorCode;
-    if (rateLimited("email_login", email, http::clientIp(req), errorCode)) {
-        if (errorCode == "rate_limited") {
-            http::error(res, 429, "rate_limited", "请求过于频繁，请稍后再试");
-        } else {
-            http::error(res, 429, "cooldown", "请稍后再发送验证码");
-        }
-        return;
-    }
-    auto user = repo::findUserByEmail(email);
-    if (user && user->isActive && deliverableEmail(user->email)) {
-        std::string code = randomCode();
-        std::map<std::string, JsonValue> record;
-        record["user_id"] = JsonValue(user->id);
-        record["code_hash"] = JsonValue(codeHash(code));
-        record["expires_at"] = jsonx::num(util::nowEpoch() + kCodeSeconds);
-        Cache::setJson(codeKey("email_login", email), jsonx::dump(record), kCodeSeconds);
-        Cache::set("email_login_cooldown:" + digestEmail(email), "1", 60);
-        sendCode(email, "UniSSO 登录验证码", "登录验证码", code, errorCode);
-    } else {
-        // Keep the response indistinguishable for unknown/undeliverable emails.
-        Cache::set("email_login_cooldown:" + digestEmail(email), "1", 60);
-    }
-    std::map<std::string, JsonValue> obj;
-    obj["ok"] = JsonValue(true);
-    obj["sent"] = JsonValue(true);
-    obj["expires_in"] = jsonx::num(kCodeSeconds);
-    obj["cooldown"] = jsonx::num(60);
-    http::json(res, 200, JsonValue(obj));
-}
-
-void emailCodeVerify(const Request& req, Response& res) {
-    std::string email = normalizeEmail(http::input(req, "email"));
-    std::string code = util::trim(http::input(req, "code"));
-    std::string next = util::trim(http::input(req, "next"));
-    if (!validEmail(email) || code.size() != 6) {
-        http::error(res, 400, "invalid_code", "验证码不正确或已过期");
-        return;
-    }
-    std::string digest = digestEmail(email);
-    long long attempts = Cache::incr("email_login_attempts:" + digest, kCodeSeconds);
-    if (attempts > 5) {
-        Cache::del(codeKey("email_login", email));
-        Cache::del("email_login_attempts:" + digest);
-        http::error(res, 429, "too_many_attempts", "尝试次数过多，请重新获取验证码");
-        return;
-    }
-    std::string userId;
-    std::string errorCode;
-    if (!readCodeRecord("email_login", email, code, userId, errorCode)) {
-        http::error(res, 401, "invalid_code", "验证码不正确或已过期");
-        return;
-    }
-    auto user = repo::findUserById(userId);
-    if (!user || !user->isActive || normalizeEmail(user->email) != email) {
-        http::error(res, 401, "invalid_code", "验证码不正确或已过期");
-        return;
-    }
-    Cache::del(codeKey("email_login", email));
-    Cache::del("email_login_attempts:" + digest);
-    Cache::del("email_login_cooldown:" + digest);
-    // Holding the mailbox is second-factor quality: keep the IP book of an
-    // already-trusted device current (never creates trust for a new device).
-    authx::noteDeviceIp(user->id, req);
-    repo::updateUserLastLogin(user->id);
-    std::string session = authx::createSession(
-        user->id, user->username.empty() ? user->email : user->username, req);
-    authx::setSessionCookie(res, req, session);
-    std::string safeNext = next.rfind("/", 0) == 0 && next.rfind("//", 0) != 0 ? next : "/";
-    applog::access("[auth] email-code login user=" + user->id);
-    std::map<std::string, JsonValue> obj;
-    obj["ok"] = JsonValue(true);
-    obj["user"] = repo::userJson(*user, true);
-    obj["next"] = JsonValue(safeNext);
-    http::json(res, 200, JsonValue(obj));
-}
 
 void passwordResetStart(const Request& req, Response& res) {
     std::string email = normalizeEmail(http::input(req, "email"));
@@ -313,14 +208,10 @@ void passwordResetConfirm(const Request& req, Response& res) {
     Cache::del("password_reset_attempts:" + digest);
     Cache::del("password_reset_cooldown:" + digest);
     revokeUserSessions(user->id);
-    revokeUserStepUps(user->id);
-    Db::exec("DELETE FROM trusted_devices WHERE user_id=" + Db::quote(user->id));
     Db::exec("UPDATE access_tokens SET revoked=1 WHERE user_id=" + Db::quote(user->id) +
              " AND revoked=0");
     Db::exec("UPDATE refresh_tokens SET revoked=1 WHERE user_id=" + Db::quote(user->id) +
              " AND revoked=0");
-    Db::exec("UPDATE step_up_device_requests SET status='canceled', decided_at=NOW() "
-             "WHERE user_id=" + Db::quote(user->id) + " AND status='pending'");
     applog::access("[auth] password reset user=" + user->id);
     std::map<std::string, JsonValue> obj;
     obj["ok"] = JsonValue(true);

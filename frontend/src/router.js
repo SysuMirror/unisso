@@ -8,33 +8,26 @@ const RegisterView = () => import('./views/RegisterView.vue')
 const VerifyEmailView = () => import('./views/VerifyEmailView.vue')
 const ResetPasswordView = () => import('./views/ResetPasswordView.vue')
 const QrConfirmView = () => import('./views/QrConfirmView.vue')
-const StepUpView = () => import('./views/StepUpView.vue')
-const DashboardView = () => import('./views/DashboardView.vue')
 const ProfileView = () => import('./views/ProfileView.vue')
-const ConsentsView = () => import('./views/ConsentsView.vue')
 const AuthorizeView = () => import('./views/AuthorizeView.vue')
 const AdminAppsView = () => import('./views/AdminAppsView.vue')
-const AdminOrgsView = () => import('./views/AdminOrgsView.vue')
 const AdminUsersView = () => import('./views/AdminUsersView.vue')
 const AdminLogsView = () => import('./views/AdminLogsView.vue')
 const PrivacyView = () => import('./views/PrivacyView.vue')
 const NotFoundView = () => import('./views/NotFoundView.vue')
 
 const routes = [
-  { path: '/', name: 'dashboard', component: DashboardView, meta: { requiresAuth: true } },
+  { path: '/', redirect: '/profile' },
   { path: '/login', name: 'login', component: LoginView },
   { path: '/register', name: 'register', component: RegisterView },
   { path: '/verify-email', name: 'verify-email', component: VerifyEmailView },
   { path: '/reset-password', name: 'reset-password', component: ResetPasswordView },
-  { path: '/step-up', name: 'step-up', component: StepUpView },
   { path: '/qr/:id', name: 'qr-confirm', component: QrConfirmView, meta: { requiresAuth: true } },
   { path: '/profile', name: 'profile', component: ProfileView, meta: { requiresAuth: true } },
-  { path: '/consents', name: 'consents', component: ConsentsView, meta: { requiresAuth: true } },
+  { path: '/consents', redirect: '/profile' },
   { path: '/authorize', name: 'authorize', component: AuthorizeView, meta: { requiresAuth: true } },
   { path: '/privacy', name: 'privacy', component: PrivacyView },
   { path: '/admin/apps', name: 'admin-apps', component: AdminAppsView, meta: { requiresAuth: true, requiresSuperAdmin: true } },
-  { path: '/admin/orgs', name: 'admin-orgs', component: AdminOrgsView, meta: { requiresAuth: true, requiresSuperAdmin: true } },
-  { path: '/admin/org', redirect: '/admin/orgs' },
   { path: '/admin/users', name: 'admin-users', component: AdminUsersView, meta: { requiresAuth: true, requiresSuperAdmin: true } },
   { path: '/admin/logs', name: 'admin-logs', component: AdminLogsView, meta: { requiresAuth: true, requiresSuperAdmin: true } },
   { path: '/:pathMatch(.*)*', name: 'not-found', component: NotFoundView }
@@ -54,14 +47,11 @@ router.beforeEach(async (to) => {
   if (to.meta.requiresAuth && !store.user) {
     return { path: '/login', query: { next: to.fullPath } }
   }
-  if (to.meta.requiresAdmin && !store.user?.is_admin) {
-    return { path: '/' }
-  }
   if (to.meta.requiresSuperAdmin && !store.user?.is_super_admin) {
-    return { path: '/' }
+    return { path: '/profile' }
   }
   if ((to.path === '/login' || to.path === '/register') && store.user) {
-    return { path: '/' }
+    return { path: '/profile' }
   }
   return true
 })

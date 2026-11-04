@@ -12,32 +12,9 @@ void registerAll(Server& app) {
     app.get("/api/account/sessions", handlers::sessionsList);
     app.del("/api/account/sessions/{id}", handlers::sessionRevoke);
     app.post("/api/account/sessions/revoke-others", handlers::sessionRevokeOthers);
-    app.get("/api/account/device-trust", handlers::deviceTrustStatus);
-    app.post("/api/account/device-trust", handlers::deviceTrustSet);
     app.post("/api/auth/login", handlers::authLogin);
-    app.post("/api/auth/email-code/start", handlers::emailCodeStart);
-    app.post("/api/auth/email-code/verify", handlers::emailCodeVerify);
     app.post("/api/auth/password-reset/start", handlers::passwordResetStart);
     app.post("/api/auth/password-reset/confirm", handlers::passwordResetConfirm);
-    app.post("/api/auth/step-up/methods", handlers::stepUpMethods);
-    app.post("/api/auth/step-up/device/start", handlers::stepUpDeviceStart);
-    app.post("/api/auth/step-up/device/status", handlers::stepUpDeviceStatus);
-    app.get("/api/auth/step-up/device/pending", handlers::stepUpDevicePending);
-    app.post("/api/auth/step-up/device/{id}/decide", handlers::stepUpDeviceDecide);
-    app.post("/api/auth/step-up/email", handlers::stepUpSendEmail);
-    app.post("/api/auth/step-up/verify", handlers::stepUpVerify);
-    app.post("/api/auth/step-up/cancel", handlers::stepUpCancel);
-    app.post("/api/auth/step-up/face/session", handlers::stepUpFaceSession);
-    app.post("/api/auth/step-up/face/verify", handlers::stepUpFaceVerify);
-
-    app.get("/api/account/faces/status", handlers::faceStatus);
-    app.get("/api/account/faces", handlers::facesList);
-    app.post("/api/account/faces/session", handlers::faceSession);
-    app.post("/api/account/faces/probe", handlers::faceProbe);
-    app.post("/api/account/faces/send-code", handlers::faceSendCode);
-    app.post("/api/account/faces/confirm", handlers::faceConfirm);
-    app.post("/api/account/faces/enroll", handlers::faceEnroll);
-    app.del("/api/account/faces/{id}", handlers::faceUnbind);
     app.post("/api/auth/logout", handlers::authLogout);
     app.get("/api/auth/me", handlers::authMe);
     app.get("/api/auth/session", handlers::authSession);
@@ -50,10 +27,6 @@ void registerAll(Server& app) {
     app.get("/api/admin/logs/{file}", handlers::adminLogsTail);
 
     app.put("/api/me/profile", handlers::accountUpdateProfile);
-    app.get("/api/account/links", handlers::accountLinksList);
-    app.post("/api/account/links/send-code", handlers::accountLinkSendCode);
-    app.post("/api/account/links", handlers::accountLinkBind);
-    app.del("/api/account/links/{id}", handlers::accountLinkUnbind);
     app.get("/api/auth/sse/qr/status", handlers::sseQrStatus);
     app.get("/api/auth/sse/qr/start", handlers::sseQrStart);
     app.get("/api/auth/sse/qr/poll", handlers::sseQrPoll);
@@ -79,22 +52,13 @@ void registerAll(Server& app) {
     app.get("/.well-known/openid-configuration", handlers::oidcDiscovery);
     app.get("/.well-known/jwks.json", handlers::oidcJwks);
 
-    // Applications
-
-    app.get("/api/orgs", handlers::organizationsList);
-    app.post("/api/orgs", handlers::organizationsCreate);
-    app.get("/api/orgs/{id}/members", handlers::organizationsGet);
-    app.post("/api/orgs/{id}/members", handlers::organizationsAddMember);
-    app.put("/api/orgs/{id}/members/{userId}", handlers::organizationsSetMember);
-    app.del("/api/orgs/{id}/members/{userId}", handlers::organizationsRemoveMember);
-    app.post("/api/orgs/{id}/join-requests", handlers::organizationsJoinApply);
-    app.get("/api/org-join-requests", handlers::orgJoinRequestsPending);
-    app.get("/api/org-join-requests/mine", handlers::orgJoinRequestsMine);
-    app.post("/api/org-join-requests/{id}/review", handlers::orgJoinRequestReview);
-
+    // Applications: first-party (admin-managed) and third-party (apply/review).
     app.get("/api/apps/integration-skill", handlers::appIntegrationSkill);
     app.get("/api/apps", handlers::appsList);
     app.post("/api/apps", handlers::appsCreate);
+    app.post("/api/apps/apply", handlers::appsApply);
+    app.get("/api/apps/pending", handlers::appsPending);
+    app.post("/api/apps/{id}/review", handlers::appsReview);
     app.get("/api/apps/{id}", handlers::appsGet);
     app.put("/api/apps/{id}", handlers::appsUpdate);
     app.del("/api/apps/{id}", handlers::appsDelete);

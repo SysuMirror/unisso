@@ -1,4 +1,5 @@
 #include "core.h"
+#include "app/logger.h"
 
 #include <algorithm>
 #include <cstdlib>
@@ -131,6 +132,13 @@ bool validateAuthorize(const Request& req, bool fromQuery,
         message = "应用不存在或已停用";
         return false;
     }
+    if (found->status != "approved") {
+        errorCode = "invalid_client";
+        message = found->status == "pending" ? "应用接入审核中，暂不可用"
+                 : found->status == "suspended" ? "应用已被暂停，请联系平台管理员"
+                 : "应用接入申请未通过";
+        return false;
+    }
     app = *found;
     if (!redirectAllowed(app, ar.redirectUri)) {
         errorCode = "invalid_redirect_uri";
@@ -201,7 +209,6 @@ void oauthContext(const Request& req, Response& res) {
         return;
     }
 
-    std::vector<User> peers = repo::linkedPeers(user.id);
     auto accountJson = [&](const User& account) {
         std::map<std::string, JsonValue> item;
         item["id"] = JsonValue(account.id);
@@ -226,7 +233,6 @@ void oauthContext(const Request& req, Response& res) {
     };
     std::vector<JsonValue> accounts;
     accounts.push_back(accountJson(user));
-    for (const auto& peer : peers) accounts.push_back(accountJson(peer));
 
     // Always show the consent screen. A previous grant must not silently
     // re-issue a code: the user expects to review the app and click Allow.
@@ -288,22 +294,11 @@ void oauthAuthorize(const Request& req, Response& res) {
     }
 
     std::string asUserId = util::trim(http::input(req, "as_user_id"));
-    User selected = user;
     if (!asUserId.empty() && asUserId != user.id) {
-        auto peers = repo::linkedPeers(user.id);
-        bool found = false;
-        for (const auto& peer : peers) {
-            if (peer.id == asUserId) { selected = peer; found = true; break; }
-        }
-        if (!found) {
-            http::error(res, 403, "forbidden", "不能以该账号授权");
-            return;
-        }
-        if (!selected.isActive) {
-            http::error(res, 400, "inactive_account", "该账号已停用");
-            return;
-        }
+        http::error(res, 403, "forbidden", "不能以该账号授权");
+        return;
     }
+    User selected = user;
 
     // Which marketplace identity (sse_sub) this grant should present. Only
     // ids already bound to the selected account may be chosen; empty keeps
@@ -573,10 +568,11 @@ bool m2mAuthorized(const Request& req, Response& res, std::string& clientId) {
         oauthError(res, 401, "invalid_client");
         return false;
     }
-    // Silent SSO is enabled per application from the admin console. The
-    // environment allow-list is still honoured so existing deployments keep
-    // working until every client has been switched over in the database.
-    bool allowed = app->m2mEnabled;
+    // Silent SSO is first-party only, and enabled per application from the
+    // admin console. The environment allow-list is still honoured so existing
+    // deployments keep working until every client has been switched over in
+    // the database.
+    bool allowed = app->kind == "internal" && app->m2mEnabled;
     std::string allowRaw = util::env("UNISSO_PASSWORD_VERIFY_CLIENTS", "");
     if (!allowed && !allowRaw.empty()) {
         std::stringstream stream(allowRaw);
@@ -586,6 +582,10 @@ bool m2mAuthorized(const Request& req, Response& res, std::string& clientId) {
         }
     }
     if (!allowed) {
+        // Misconfigured platforms are the most common cause; log the client
+        // and its flags so the next deploy failure is diagnosable in one line.
+        applog::error("[oauth] password/verify forbidden client=" + clientId +
+                      " kind=" + app->kind + " m2m=" + (app->m2mEnabled ? "1" : "0"));
         oauthError(res, 403, "password_verify_forbidden");
         return false;
     }

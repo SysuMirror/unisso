@@ -115,42 +115,6 @@ void AppConfig::load() {
 
     accessTokenMinutes = util::envInt(
         "UNISSO_ACCESS_TOKEN_MINUTES", yInt("jwt.access_token_minutes", 60));
-    stepUpDays = util::envInt("UNISSO_STEP_UP_DAYS",
-                              yInt("security.step_up_days", 7));
-    trustDeviceDays = util::envInt("UNISSO_TRUST_DEVICE_DAYS",
-                                   yInt("security.trust_device_days", 180));
-    if (trustDeviceDays < 1) trustDeviceDays = 1;
-    if (trustDeviceDays > 3650) trustDeviceDays = 3650;
-
-    faceBaseUrl = util::env("UNISSO_FACE_BASE_URL",
-                            yStr("face.base_url", "https://ai.ssemarket.cn/face"));
-    faceApiKeyFile = util::env("UNISSO_FACE_API_KEY_FILE",
-                               yStr("face.api_key_file", "secrets/face-api.key"));
-    faceLoginThreshold = 0.6;
-    faceBindThreshold = 0.5;
-    if (localLoaded) {
-        faceLoginThreshold = local.getDouble("face.login_threshold", faceLoginThreshold);
-        faceBindThreshold = local.getDouble("face.bind_threshold", faceBindThreshold);
-    }
-    if (yamlLoaded) {
-        faceLoginThreshold = yaml.getDouble("face.login_threshold", faceLoginThreshold);
-        faceBindThreshold = yaml.getDouble("face.bind_threshold", faceBindThreshold);
-    }
-    auto envDouble = [](const char* name, double fallback) {
-        std::string value = util::env(name, "");
-        if (value.empty()) return fallback;
-        try { return std::stod(value); } catch (...) { return fallback; }
-    };
-    faceLoginThreshold = envDouble("UNISSO_FACE_LOGIN_THRESHOLD", faceLoginThreshold);
-    faceBindThreshold = envDouble("UNISSO_FACE_BIND_THRESHOLD", faceBindThreshold);
-    faceTimeoutSeconds = util::envInt("UNISSO_FACE_TIMEOUT_SECONDS",
-                                      yInt("face.timeout_seconds", 30));
-    faceApiKey = util::env("UNISSO_FACE_API_KEY", "");
-    if (faceApiKey.empty()) {
-        std::string keyFile;
-        if (util::readFile(faceApiKeyFile, keyFile)) faceApiKey = util::trim(keyFile);
-    }
-    faceEnabled = !faceApiKey.empty();
     refreshTokenDays = util::envInt(
         "UNISSO_REFRESH_TOKEN_DAYS", yInt("jwt.refresh_token_days", 7));
     idTokenMinutes = util::envInt(
@@ -925,7 +889,8 @@ JsonValue userClaims(const User& user, const std::vector<std::string>& granted) 
         claims["email_verified"] = JsonValue(user.emailVerified);
     }
     if (has("roles")) {
-        std::vector<std::string> roles = user.roles;
+        std::vector<std::string> roles;
+        if (user.isSuperAdmin) roles.push_back("super_admin");
         claims["roles"] = JsonValue(roles);
     }
     claims["internal"] = JsonValue(user.isInternal);
@@ -1239,44 +1204,6 @@ std::string originOf(const std::string& url) {
 
 namespace {
 
-// trusted_devices.known_ips is a JSON array of the most recent addresses this
-// browser authenticated from (campus NAT and dual-stack flap would otherwise
-// turn a returning device into a "new device" every few hours).
-std::vector<std::string> knownIpList(const std::string& rawJson) {
-    std::vector<std::string> out;
-    if (rawJson.empty()) return out;
-    JsonValue value;
-    try { value.fromJson(rawJson); } catch (...) {}
-    if (value.getType() == JsonValue::ARRAY) {
-        for (const auto& item : value.asArray()) {
-            if (item.getType() == JsonValue::STRING && !item.asString().empty())
-                out.push_back(item.asString());
-        }
-    }
-    return out;
-}
-
-std::string addKnownIp(const std::string& rawJson, const std::string& ip) {
-    if (ip.empty()) return rawJson;
-    auto list = knownIpList(rawJson);
-    for (const auto& item : list) {
-        if (http::sameIp(item, ip)) return JsonValue(list).toJson();
-    }
-    list.push_back(ip);
-    if (list.size() > 8) list.erase(list.begin());
-    return JsonValue(list).toJson();
-}
-
-bool ipSeenForDevice(const std::string& storedIp, const std::string& knownJson,
-                     const std::string& current) {
-    if (current.empty()) return false;
-    if (!storedIp.empty() && http::sameIp(storedIp, current)) return true;
-    for (const auto& item : knownIpList(knownJson)) {
-        if (http::sameIp(item, current)) return true;
-    }
-    return false;
-}
-
 std::vector<std::string> configStringList(const std::string& raw) {
     std::vector<std::string> out;
     if (raw.empty()) return out;
@@ -1394,119 +1321,6 @@ bool requireSuperAdmin(const Request& req, Response& res, User& out) {
         return false;
     }
     return true;
-}
-
-std::string deviceHash(const std::string& token) {
-    return util::hex(util::sha256Raw(token));
-}
-
-bool hasActiveSession(const std::string& userId) {
-    for (const auto& name : Cache::scan("session:*", 500)) {
-        std::string raw = Cache::get(name);
-        if (raw.empty()) continue;
-        std::map<std::string, JsonValue> data;
-        if (!jsonx::parseObject(raw, data)) continue;
-        if (jsonx::getString(data, "user_id") == userId) return true;
-    }
-    return false;
-}
-
-void cancelDeviceRequests(const std::string& stepUpToken) {
-    if (stepUpToken.empty()) return;
-    auto& cfg = AppConfig::get();
-    std::string key = cfg.secretKey.empty() ? cfg.signingKeyId : cfg.secretKey;
-    std::string hash = util::hex(util::hmacSha256Raw(key, stepUpToken));
-    Db::exec("UPDATE step_up_device_requests SET status='canceled', decided_at=NOW() "
-             "WHERE challenge_hash=" + Db::quote(hash) + " AND status='pending'");
-}
-
-bool deviceTrusted(const std::string& userId, const Request& req) {
-    std::string raw = http::cookie(req, "unisso_device");
-    if (raw.empty()) return false;
-    auto rows = Db::query(
-        "SELECT id, ip, known_ips FROM trusted_devices WHERE user_id=" + Db::quote(userId) +
-        " AND token_hash=" + Db::quote(deviceHash(raw)) +
-        " AND last_seen_at >= NOW() - INTERVAL " +
-        std::to_string(AppConfig::get().trustDeviceDays) + " DAY LIMIT 1");
-    if (rows.empty()) return false;
-    const auto& row = rows.front();
-    // The cookie proves which browser this is, the IP proves where it is.
-    // A trusted browser showing up at an address we have never seen it at
-    // counts as a new device and gets the second factor again.
-    if (!ipSeenForDevice(row.count("ip") ? row.at("ip") : "",
-                         row.count("known_ips") ? row.at("known_ips") : "",
-                         http::clientIp(req))) {
-        return false;
-    }
-    Db::exec("UPDATE trusted_devices SET last_seen_at=NOW() WHERE id=" +
-             Db::quote(row.at("id")));
-    return true;
-}
-
-void noteDeviceIp(const std::string& userId, const Request& req) {
-    std::string raw = http::cookie(req, "unisso_device");
-    if (raw.empty()) return;
-    auto rows = Db::query(
-        "SELECT id, known_ips FROM trusted_devices WHERE user_id=" + Db::quote(userId) +
-        " AND token_hash=" + Db::quote(deviceHash(raw)) +
-        " AND last_seen_at >= NOW() - INTERVAL " +
-        std::to_string(AppConfig::get().trustDeviceDays) + " DAY LIMIT 1");
-    if (rows.empty()) return;
-    // This login was a second-factor proof in its own right (email code):
-    // refresh the address book of an already-trusted device so the user does
-    // not have to re-verify just because their campus IP rotated.
-    std::string ip = http::clientIp(req);
-    std::string known = addKnownIp(
-        rows.front().count("known_ips") ? rows.front().at("known_ips") : "", ip);
-    Db::exec("UPDATE trusted_devices SET ip=" + Db::nullable(ip) +
-             ", known_ips=" + Db::nullable(known) + ", last_seen_at=NOW() WHERE id=" +
-             Db::quote(rows.front().at("id")));
-}
-
-std::string trustDevice(const std::string& userId, const Request& req, Response& res) {
-    std::string raw = http::cookie(req, "unisso_device");
-    std::string ua = http::header(req, "User-Agent");
-    if (ua.size() > 255) ua.resize(255);
-    std::string ip = http::clientIp(req);
-    auto link = [&](const std::string& token) -> std::string {
-        std::string hash = deviceHash(token);
-        auto existing = Db::query(
-            "SELECT id, known_ips FROM trusted_devices WHERE user_id=" + Db::quote(userId) +
-            " AND token_hash=" + Db::quote(hash) + " LIMIT 1");
-        if (!existing.empty()) {
-            std::string known = addKnownIp(
-                existing.front().count("known_ips") ? existing.front().at("known_ips") : "", ip);
-            Db::exec("UPDATE trusted_devices SET last_seen_at=NOW(), user_agent=" +
-                     Db::nullable(ua) + ", ip=" + Db::nullable(ip) + ", known_ips=" +
-                     Db::nullable(known) + " WHERE id=" + Db::quote(existing.front().at("id")));
-            return hash;
-        }
-        Db::exec("INSERT INTO trusted_devices (id,user_id,token_hash,user_agent,ip,known_ips,"
-                 "created_at,last_seen_at) VALUES (" + Db::quote(util::uuid4()) + "," +
-                 Db::quote(userId) + "," + Db::quote(hash) + "," + Db::nullable(ua) + "," +
-                 Db::nullable(ip) + "," + Db::nullable(addKnownIp("", ip)) + ",NOW(),NOW())");
-        return hash;
-    };
-    if (!raw.empty()) {
-        // Only reuse a cookie that is not already bound to another account.
-        auto other = Db::query("SELECT user_id FROM trusted_devices WHERE token_hash=" +
-                               Db::quote(deviceHash(raw)) + " LIMIT 1");
-        if (other.empty() || other.front().at("user_id") == userId) {
-            return link(raw);
-        }
-    }
-    std::string token = util::randomToken(32);
-    std::string hash = link(token);
-    http::setCookie(res, req, "unisso_device", token,
-                    AppConfig::get().trustDeviceDays * 24 * 3600);
-    return hash;
-}
-
-void untrustDevice(const std::string& userId, const Request& req) {
-    std::string raw = http::cookie(req, "unisso_device");
-    if (raw.empty()) return;
-    Db::exec("DELETE FROM trusted_devices WHERE user_id=" + Db::quote(userId) +
-             " AND token_hash=" + Db::quote(deviceHash(raw)));
 }
 
 void setSessionCookie(Response& res, const Request& req, const std::string& session) {

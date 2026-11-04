@@ -14,41 +14,6 @@
     <div v-if="error" class="alert alert-danger">{{ error }}</div>
     <div v-if="notice" class="alert alert-success">{{ notice }}</div>
 
-    <div class="device-trust">
-      <div class="device-trust-main">
-        <div class="device-trust-title">
-          当前设备{{ trust.trusted ? '已开启长期信任' : '未开启长期信任' }}
-        </div>
-        <p class="device-trust-copy">
-          {{ trust.trusted
-            ? `这台设备在 ${trust.days} 天内登录时不再要求二次验证。`
-            : `下次登录仍会要求邮箱或人脸二次验证。` }}
-        </p>
-      </div>
-      <button v-if="!trust.trusted" class="btn btn-secondary btn-sm" type="button"
-              :disabled="busy" @click="trustRisk = true">
-        信任此设备
-      </button>
-      <button v-else class="btn btn-secondary btn-sm" type="button"
-              :disabled="busy" @click="disableTrust">
-        取消信任
-      </button>
-    </div>
-
-    <div v-if="trustRisk" class="device-trust-risk">
-      <p class="device-trust-risk-text">
-        只在你自己的设备上开启。开启后，这台设备登录时不再要求邮箱或人脸验证；
-        任何能使用这台设备的人都可以直接进入你的账号。账号连续多天未登录时仍会要求验证。
-        你可以随时在这里取消信任。
-      </p>
-      <div class="device-trust-actions">
-        <button class="btn btn-primary btn-sm" type="button"
-                :disabled="busy" @click="enableTrust">我已了解风险，信任此设备</button>
-        <button class="btn btn-ghost btn-sm" type="button"
-                :disabled="busy" @click="trustRisk = false">取消</button>
-      </div>
-    </div>
-
     <div v-if="loading" class="loading-line"><span class="spinner"></span>加载中…</div>
 
     <div v-else-if="sessions.length" class="device-list">
@@ -78,8 +43,7 @@
     <div v-else-if="!loading" class="compact-empty">当前只有这一台设备在登录。</div>
 
     <p class="footnote">
-      退出设备会立即下线该会话，并移除它的长期信任，下次登录需要重新验证；
-      同一设备还有其他登录会话时会保留信任。当前设备请使用页面右上角的退出登录。
+      退出设备会立即下线该会话；当前设备请使用页面右上角的退出登录。
     </p>
   </section>
 </template>
@@ -89,8 +53,6 @@ import { computed, onMounted, ref } from 'vue'
 import { api } from '../api'
 
 const sessions = ref([])
-const trust = ref({ trusted: false, days: 180, last_seen_at: '' })
-const trustRisk = ref(false)
 const loading = ref(true)
 const busy = ref(false)
 const error = ref('')
@@ -152,67 +114,8 @@ async function load() {
   }
 }
 
-async function loadTrust() {
-  try {
-    const data = await api('/api/account/device-trust')
-    trust.value = {
-      trusted: !!data.trusted,
-      days: Number(data.days) || 180,
-      last_seen_at: data.last_seen_at || ''
-    }
-  } catch (e) {
-    if (!error.value) error.value = e.message
-  }
-}
-
-async function enableTrust() {
-  error.value = ''
-  notice.value = ''
-  busy.value = true
-  try {
-    const data = await api('/api/account/device-trust', {
-      method: 'POST',
-      body: { trusted: true }
-    })
-    trust.value = {
-      trusted: !!data.trusted,
-      days: Number(data.days) || trust.value.days,
-      last_seen_at: trust.value.last_seen_at
-    }
-    trustRisk.value = false
-    notice.value = `已信任当前设备 ${trust.value.days} 天。`
-  } catch (e) {
-    error.value = e.message
-  } finally {
-    busy.value = false
-  }
-}
-
-async function disableTrust() {
-  if (!window.confirm(`取消当前设备的长期信任？下次登录需要重新完成二次验证。`)) return
-  error.value = ''
-  notice.value = ''
-  busy.value = true
-  try {
-    const data = await api('/api/account/device-trust', {
-      method: 'POST',
-      body: { trusted: false }
-    })
-    trust.value = {
-      trusted: !!data.trusted,
-      days: Number(data.days) || trust.value.days,
-      last_seen_at: ''
-    }
-    notice.value = '已取消当前设备的长期信任。'
-  } catch (e) {
-    error.value = e.message
-  } finally {
-    busy.value = false
-  }
-}
-
 async function revoke(session) {
-  if (!window.confirm(`退出「${deviceLabel(session.user_agent)}」？该设备会立即下线并移除长期信任，下次登录需要重新验证。`)) return
+  if (!window.confirm(`退出「${deviceLabel(session.user_agent)}」？该设备会立即下线。`)) return
   error.value = ''
   notice.value = ''
   busy.value = true
@@ -228,7 +131,7 @@ async function revoke(session) {
 }
 
 async function revokeOthers() {
-  if (!window.confirm(`退出其他 ${otherCount.value} 台设备？这些设备会立即下线并移除长期信任，下次登录需要重新验证。`)) return
+  if (!window.confirm(`退出其他 ${otherCount.value} 台设备？这些设备会立即下线。`)) return
   error.value = ''
   notice.value = ''
   busy.value = true
@@ -243,44 +146,10 @@ async function revokeOthers() {
   }
 }
 
-onMounted(() => {
-  load()
-  loadTrust()
-})
+onMounted(load)
 </script>
 
 <style scoped>
-.device-trust {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  padding: 14px 18px;
-  border-top: 1px solid var(--line);
-  border-bottom: 1px solid var(--line);
-  background: var(--fill);
-}
-.device-trust-main { min-width: 0; }
-.device-trust-title { font-size: 13px; color: var(--ink); }
-.device-trust-copy { margin: 4px 0 0; font-size: 11.5px; line-height: 1.7; color: var(--ink-faint); }
-.device-trust-risk {
-  padding: 12px 18px;
-  border-bottom: 1px solid var(--line);
-  border-left: 2px solid var(--warn);
-  background: var(--warn-soft);
-}
-.device-trust-risk-text {
-  margin: 0;
-  font-size: 11.5px;
-  line-height: 1.75;
-  color: var(--warn);
-}
-.device-trust-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 10px;
-}
 .device-list { border-top: 1px solid var(--line); }
 .device-row {
   display: grid;
@@ -323,11 +192,6 @@ onMounted(() => {
 .device-action { display: flex; justify-content: flex-end; }
 .footnote { margin: 12px 18px 16px; font-size: 11.5px; line-height: 1.7; color: var(--ink-faint); }
 @media (max-width: 640px) {
-  .device-trust {
-    flex-direction: column;
-    align-items: flex-start;
-    padding: 12px 14px;
-  }
   .device-row {
     grid-template-columns: 36px minmax(0, 1fr);
     gap: 10px;

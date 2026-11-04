@@ -166,25 +166,14 @@ void sseQrPoll(const Request& req, Response& res) {
         return;
     }
     // The session is created here (the desktop browser), not on the phone,
-    // so device trust and the step-up gate see the desktop's UA/IP/cookie.
+    // so the gate sees the desktop's UA/IP/cookie.
     std::string next = safeNextPath(jsonx::getString(data, "next", "/"));
-    if (loginNeedsStepUp(*user, req, true)) {
-        Cache::del("sse_qr:" + state);
-        Cache::del("sse_qr_claim:" + state);
-        applog::access("[sse-qr] step-up required before claim user=" + user->id);
-        beginStepUp(req, res, *user, next, true);
-        return;
-    }
-    std::string deviceHash;
-    if (authx::deviceTrusted(user->id, req)) {
-        deviceHash = authx::deviceHash(http::cookie(req, "unisso_device"));
-    }
-    repo::updateUserLastLogin(user->id);
-    std::string session = authx::createSession(
-        user->id, user->username.empty() ? user->email : user->username, req, deviceHash);
-    authx::setSessionCookie(res, req, session);
     Cache::del("sse_qr:" + state);
     Cache::del("sse_qr_claim:" + state);
+    repo::updateUserLastLogin(user->id);
+    std::string session = authx::createSession(
+        user->id, user->username.empty() ? user->email : user->username, req);
+    authx::setSessionCookie(res, req, session);
     applog::access("[auth] sse-qr login user=" + user->id);
     obj["status"] = JsonValue("authorized");
     obj["next"] = JsonValue(next);
@@ -309,32 +298,9 @@ void sseOauthCallback(const Request& req, Response& res) {
     // no such cookie and keeps the original approval-only path.
     if (http::cookie(req, "unisso_qr_state") == state) {
         std::string next = safeNextPath(jsonx::getString(pending, "next", "/"));
-        if (loginNeedsStepUp(*user, req, true)) {
-            Response stepRes;
-            std::string stepToken;
-            beginStepUp(req, stepRes, *user, next, true, &stepToken);
-            Cache::del("sse_qr:" + state);
-            Cache::del(claimKey);
-            if (!stepToken.empty()) {
-                // setCookie() stores Set-Cookie in Response::extraHeaders
-                // (headers is a single-value map and would never contain it).
-                for (const auto& hc : stepRes.extraHeaders) {
-                    if (hc.first == "Set-Cookie") res.addHeader(hc.first, hc.second);
-                }
-                html(res, 200, redirectHtml("/step-up?token=" + stepToken));
-                applog::access("[sse-oauth] same-device step-up user=" + user->id);
-                return;
-            }
-            html(res, 503, errorHtml("二次验证暂不可用，请使用邮箱验证码登录，或稍后重试。"));
-            return;
-        }
-        std::string deviceHash;
-        if (authx::deviceTrusted(user->id, req)) {
-            deviceHash = authx::deviceHash(http::cookie(req, "unisso_device"));
-        }
         repo::updateUserLastLogin(user->id);
         std::string session = authx::createSession(
-            user->id, user->username.empty() ? user->email : user->username, req, deviceHash);
+            user->id, user->username.empty() ? user->email : user->username, req);
         authx::setSessionCookie(res, req, session);
         Cache::del("sse_qr:" + state);
         Cache::del(claimKey);

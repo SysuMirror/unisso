@@ -103,6 +103,21 @@ std::string stringArraySql(const std::vector<std::string>& values) {
     return Db::quote(JsonValue(values).toJson());
 }
 
+bool insertApplication(const Application& app, const std::string& secretHash) {
+    std::string sql =
+        "INSERT INTO applications (id,client_id,client_secret,name,description,icon,"
+        "redirect_uris,allowed_scopes,homepage_url,is_active,is_confidential,"
+        "kind,status,owner_id,created_at,updated_at) VALUES (" +
+        Db::quote(app.id) + "," + Db::quote(app.clientId) + "," + Db::quote(secretHash) + "," +
+        Db::quote(app.name) + "," + Db::nullable(app.description) + "," +
+        Db::nullable(app.icon) + "," +
+        stringArraySql(app.redirectUris) + "," + stringArraySql(app.allowedScopes) + "," +
+        Db::nullable(app.homepageUrl) + "," + (app.isActive ? "1" : "0") + "," +
+        (app.isConfidential ? "1" : "0") + "," + Db::quote(app.kind) + "," +
+        Db::quote(app.status) + "," + Db::quote(app.ownerId) + ",NOW(),NOW())";
+    return Db::exec(sql) >= 0;
+}
+
 }  // namespace
 
 namespace handlers {
@@ -177,15 +192,6 @@ void appsCreate(const Request& req, Response& res) {
         return;
     }
 
-    std::string requestedOrg = util::trim(http::input(req, "organization_id"));
-    std::string organizationId;
-    organizationId = requestedOrg.empty() ? constants::kDefaultOrganizationId : requestedOrg;
-    auto org = Db::query("SELECT id FROM organizations WHERE id=" +
-                         Db::quote(organizationId) + " LIMIT 1");
-    if (org.empty()) {
-        http::error(res, 400, "invalid_organization", "组织不存在");
-        return;
-    }
     bool confidential = true;
     std::string confidentialInput = http::input(req, "is_confidential");
     if (!confidentialInput.empty()) confidential = confidentialInput != "false" && confidentialInput != "0";
@@ -201,8 +207,9 @@ void appsCreate(const Request& req, Response& res) {
     app.homepageUrl = util::trim(http::input(req, "homepage_url"));
     app.isActive = true;
     app.isConfidential = confidential;
+    app.kind = "internal";
+    app.status = "approved";
     app.ownerId = user.id;
-    app.organizationId = organizationId;
     app.createdAt = util::nowIso();
 
     std::string rawSecret;
@@ -216,17 +223,7 @@ void appsCreate(const Request& req, Response& res) {
         }
     }
 
-    std::string sql =
-        "INSERT INTO applications (id,client_id,client_secret,name,description,icon,"
-        "redirect_uris,allowed_scopes,homepage_url,is_active,is_confidential,owner_id,"
-        "organization_id,created_at,updated_at) VALUES (" +
-        Db::quote(app.id) + "," + Db::quote(app.clientId) + "," + Db::quote(secretHash) + "," +
-        Db::quote(app.name) + "," + Db::nullable(app.description) + "," +
-        Db::nullable(app.icon) + "," +
-        stringArraySql(app.redirectUris) + "," + stringArraySql(app.allowedScopes) + "," +
-        Db::nullable(app.homepageUrl) + ",1," + (confidential ? "1" : "0") + "," +
-        Db::quote(user.id) + "," + Db::nullable(organizationId) + ",NOW(),NOW())";
-    if (Db::exec(sql) < 0) {
+    if (!insertApplication(app, secretHash)) {
         http::error(res, 500, "create_failed", "应用创建失败");
         return;
     }
@@ -235,6 +232,113 @@ void appsCreate(const Request& req, Response& res) {
     obj["application"] = repo::applicationJson(app, false);
     obj["client_id"] = JsonValue(app.clientId);
     if (confidential) obj["client_secret"] = JsonValue(rawSecret);
+    http::ok(res, JsonValue(obj));
+}
+
+// Any logged-in 学院成员 may apply for a third-party (external) application;
+// it stays pending until the super admin approves it.
+void appsApply(const Request& req, Response& res) {
+    User user;
+    if (!authx::requireUser(req, res, user)) return;
+    if (!user.isInternal) {
+        http::error(res, 403, "internal_required", "只有学院成员可以申请接入");
+        return;
+    }
+    std::string name = util::trim(http::input(req, "name"));
+    if (name.empty()) {
+        http::error(res, 400, "invalid_input", "应用名称不能为空");
+        return;
+    }
+    std::vector<std::string> redirectUris = http::inputArray(req, "redirect_uris");
+    if (!normalizeRedirectUris(redirectUris)) {
+        http::error(res, 400, "invalid_redirect_uri",
+                    "回调地址必须使用 https://，或本地 http://localhost / http://127.0.0.1");
+        return;
+    }
+    std::vector<std::string> allowedScopes = http::inputArray(req, "allowed_scopes");
+    if (allowedScopes.empty()) allowedScopes.push_back("openid");
+    if (!validScopes(allowedScopes)) {
+        http::error(res, 400, "invalid_scope", "包含不支持的权限范围");
+        return;
+    }
+    long long pendingCount = 0;
+    auto rows = Db::query(
+        "SELECT COUNT(*) AS c FROM applications WHERE owner_id=" + Db::quote(user.id) +
+        " AND status='pending'");
+    try { pendingCount = std::stoll(rows.front().at("c")); } catch (...) {}
+    if (pendingCount >= 5) {
+        http::error(res, 429, "too_many_pending", "待审核申请过多，请等待审核结果");
+        return;
+    }
+
+    Application app;
+    app.id = util::uuid4();
+    app.clientId = newClientId();
+    app.name = name;
+    app.description = util::trim(http::input(req, "description"));
+    app.icon = util::trim(http::input(req, "icon"));
+    app.redirectUris = redirectUris;
+    app.allowedScopes = allowedScopes;
+    app.homepageUrl = util::trim(http::input(req, "homepage_url"));
+    app.isActive = false;
+    app.isConfidential = true;
+    app.kind = "external";
+    app.status = "pending";
+    app.ownerId = user.id;
+    app.createdAt = util::nowIso();
+
+    if (!insertApplication(app, "")) {
+        http::error(res, 500, "apply_failed", "申请提交失败");
+        return;
+    }
+    std::map<std::string, JsonValue> obj;
+    obj["application"] = repo::applicationJson(app, false);
+    http::ok(res, JsonValue(obj));
+}
+
+void appsPending(const Request& req, Response& res) {
+    User user;
+    if (!authx::requireSuperAdmin(req, res, user)) return;
+    auto apps = repo::listApplicationsByStatus("pending");
+    std::vector<JsonValue> items;
+    for (const auto& app : apps) items.push_back(repo::applicationJson(app, false));
+    http::json(res, 200, JsonValue(std::map<std::string, JsonValue>{
+                             {"ok", JsonValue(true)}, {"applications", JsonValue(items)}}));
+}
+
+void appsReview(const Request& req, Response& res) {
+    User user;
+    if (!authx::requireSuperAdmin(req, res, user)) return;
+    auto app = repo::findApplicationById(http::param(req, "id"));
+    if (!app) {
+        http::error(res, 404, "not_found", "应用不存在");
+        return;
+    }
+    std::string action = util::lower(util::trim(http::input(req, "action")));
+    std::string note = util::trim(http::input(req, "note"));
+    std::string status;
+    bool isActive = app->isActive;
+    if (action == "approve") status = "approved";
+    else if (action == "reject") { status = "rejected"; isActive = false; }
+    else if (action == "suspend") { status = "suspended"; isActive = false; }
+    else {
+        http::error(res, 400, "invalid_action", "action 只能是 approve、reject 或 suspend");
+        return;
+    }
+    std::string sql =
+        "UPDATE applications SET status=" + Db::quote(status) +
+        ", is_active=" + (isActive ? "1" : "0") +
+        ", reviewed_by=" + Db::quote(user.id) +
+        ", reviewed_at=NOW()" +
+        ", review_note=" + Db::nullable(note) +
+        ", updated_at=NOW() WHERE id=" + Db::quote(app->id);
+    if (Db::exec(sql) < 0) {
+        http::error(res, 500, "review_failed", "审核操作失败");
+        return;
+    }
+    auto updated = repo::findApplicationById(app->id);
+    std::map<std::string, JsonValue> obj;
+    if (updated) obj["application"] = repo::applicationJson(*updated, false);
     http::ok(res, JsonValue(obj));
 }
 
@@ -615,46 +719,8 @@ void adminUsersDelete(const Request& req, Response& res) {
             return;
         }
     }
-    // Face records: unlink this account; delete the person only when no other
-    // account references it.
-    auto faceRows = Db::query(
-        "SELECT uf.id,uf.face_person_id,fp.provider_person_id,fp.external_id "
-        "FROM user_faces uf JOIN face_persons fp ON fp.id=uf.face_person_id "
-        "WHERE uf.user_id=" + Db::quote(id));
-    for (const auto& row : faceRows) {
-        std::string facePersonId = row.at("face_person_id");
-        std::string provider = row.count("provider_person_id") ? row.at("provider_person_id") : "";
-        std::string external = row.count("external_id") ? row.at("external_id") : "";
-        Db::exec("DELETE FROM user_faces WHERE id=" + Db::quote(row.at("id")));
-        auto remaining = Db::query("SELECT COUNT(*) AS c FROM user_faces WHERE face_person_id=" +
-                                   Db::quote(facePersonId));
-        long long left = 0;
-        if (!remaining.empty()) {
-            try { left = std::stoll(remaining.front().at("c")); } catch (...) {}
-        }
-        if (left == 0) {
-            std::string faceError;
-            bool deleted = !external.empty() &&
-                           face::deletePersonByExternalId(external, faceError);
-            if (!deleted && !provider.empty()) {
-                deleted = face::deletePerson(provider, faceError);
-            }
-            if (!deleted) {
-                applog::error("[admin] face delete failed for " +
-                              (external.empty() ? provider : external) + ": " + faceError);
-            }
-            Db::exec("DELETE FROM face_persons WHERE id=" + Db::quote(facePersonId));
-        }
-    }
-    Db::exec("DELETE FROM trusted_devices WHERE user_id=" + Db::quote(id));
-    Db::exec("DELETE FROM face_audits WHERE user_id=" + Db::quote(id));
-    Db::exec("DELETE FROM account_peer_links WHERE user_a_id=" + Db::quote(id) +
-             " OR user_b_id=" + Db::quote(id));
-    Db::exec("DELETE FROM account_links WHERE canonical_user_id=" + Db::quote(id) +
-             " OR linked_user_id=" + Db::quote(id));
     Db::exec("DELETE FROM user_identities WHERE user_id=" + Db::quote(id));
     Db::exec("DELETE FROM user_consents WHERE user_id=" + Db::quote(id));
-    Db::exec("DELETE FROM user_roles WHERE user_id=" + Db::quote(id));
     Db::exec("DELETE FROM users WHERE id=" + Db::quote(id));
     http::ok(res);
 }

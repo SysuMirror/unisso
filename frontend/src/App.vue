@@ -14,10 +14,8 @@
 
         <nav class="nav" :class="{ 'is-open': mobileMenuOpen }">
           <template v-if="store.user">
-            <RouterLink to="/consents" class="nav-link" :class="{ 'is-active': route.path === '/consents' }">我的授权</RouterLink>
             <RouterLink to="/profile" class="nav-link" :class="{ 'is-active': route.path === '/profile' }">个人中心</RouterLink>
-            <RouterLink v-if="canManageApps" to="/admin/apps" class="nav-link" :class="{ 'is-active': route.path === '/admin/apps' }">应用</RouterLink>
-            <RouterLink v-if="canManageOrgs" to="/admin/orgs" class="nav-link" :class="{ 'is-active': route.path === '/admin/orgs' }">组织</RouterLink>
+            <RouterLink v-if="store.user.is_super_admin" to="/admin/apps" class="nav-link" :class="{ 'is-active': route.path === '/admin/apps' }">应用</RouterLink>
             <RouterLink v-if="store.user.is_super_admin" to="/admin/users" class="nav-link" :class="{ 'is-active': route.path === '/admin/users' }">用户</RouterLink>
             <RouterLink v-if="store.user.is_super_admin" to="/admin/logs" class="nav-link" :class="{ 'is-active': route.path === '/admin/logs' }">日志</RouterLink>
             <span class="nav-divider" aria-hidden="true"></span>
@@ -44,8 +42,6 @@
       <RouterView />
     </main>
 
-    <DeviceApprovalPrompt />
-
     <footer class="site-footer">
       <div class="footer-inner">
         <span>统一身份认证</span>
@@ -65,7 +61,6 @@
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { store, signOut } from './store'
-import DeviceApprovalPrompt from './components/DeviceApprovalPrompt.vue'
 import logo from './assets/logo.png'
 
 const route = useRoute()
@@ -75,7 +70,7 @@ const mobileMenuOpen = ref(false)
 watch(() => route.fullPath, () => { mobileMenuOpen.value = false })
 
 const isAuthPage = computed(() =>
-  ['/login', '/register', '/verify-email', '/reset-password', '/step-up', '/authorize'].includes(route.path) ||
+  ['/login', '/register', '/verify-email', '/reset-password', '/authorize'].includes(route.path) ||
   route.path.startsWith('/qr/'))
 
 const displayName = computed(() => {
@@ -85,23 +80,6 @@ const displayName = computed(() => {
 })
 
 const initial = computed(() => (displayName.value || '?').slice(0, 1).toUpperCase())
-
-const orgRoles = computed(() => {
-  const user = store.user
-  return Array.isArray(user?.organizations)
-    ? user.organizations.map((org) => org.role)
-    : []
-})
-
-// Any organization member can register apps under their org; members apply
-// to join on the orgs page, so everyone gets that nav entry.
-const canManageApps = computed(() => {
-  const user = store.user
-  if (!user) return false
-  return user.is_admin || user.is_super_admin || orgRoles.value.length > 0
-})
-
-const canManageOrgs = computed(() => !!store.user)
 
 async function logout() {
   mobileMenuOpen.value = false
