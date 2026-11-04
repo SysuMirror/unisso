@@ -10,33 +10,15 @@
 
 namespace {
 
-bool managesOrg(const User& user, const std::string& organizationId) {
-    if (user.isAdmin || user.isSuperAdmin) return true;
-    if (organizationId.empty()) return false;
-    auto rows = Db::query(
-        "SELECT role FROM organization_members WHERE organization_id=" +
-        Db::quote(organizationId) + " AND user_id=" + Db::quote(user.id) + " LIMIT 1");
-    if (rows.empty()) return false;
-    return rows.front().at("role") == "admin" || rows.front().at("role") == "developer";
-}
-
-bool canManage(const User& user, const Application& app) {
-    if (user.isAdmin || user.isSuperAdmin) return true;
-    if (!app.ownerId.empty() && app.ownerId == user.id) return true;
-    return managesOrg(user, app.organizationId);
+// The admin console is single-account by design: only super admins manage
+// applications. Regular users keep their own self-service endpoints
+// (consents, sessions, org browsing, join requests).
+bool canManage(const User& user, const Application&) {
+    return user.isSuperAdmin;
 }
 
 bool canManageApps(const User& user) {
-    if (user.isAdmin || user.isSuperAdmin) return true;
-    // Any organization member may register apps under their org (join first,
-    // then develop) — see appsCreate. Members can apply to join via
-    // org join-requests.
-    auto rows = Db::query(
-        "SELECT 1 FROM organization_members WHERE user_id=" + Db::quote(user.id) + " LIMIT 1");
-    if (!rows.empty()) return true;
-    auto owned = Db::query(
-        "SELECT 1 FROM applications WHERE owner_id=" + Db::quote(user.id) + " LIMIT 1");
-    return !owned.empty();
+    return user.isSuperAdmin;
 }
 
 std::string newClientId() {
@@ -161,7 +143,7 @@ void appIntegrationSkill(const Request& req, Response& res) {
 void appsList(const Request& req, Response& res) {
     User user;
     if (!authx::requireUser(req, res, user)) return;
-    std::vector<Application> apps = user.isAdmin
+    std::vector<Application> apps = user.isSuperAdmin
         ? repo::listApplications()
         : repo::listApplicationsForUser(user.id);
     std::vector<JsonValue> items;
@@ -173,6 +155,10 @@ void appsList(const Request& req, Response& res) {
 void appsCreate(const Request& req, Response& res) {
     User user;
     if (!authx::requireUser(req, res, user)) return;
+    if (!user.isSuperAdmin) {
+        http::error(res, 403, "super_admin_required", "只有超级管理员可以注册应用");
+        return;
+    }
     std::string name = util::trim(http::input(req, "name"));
     if (name.empty()) {
         http::error(res, 400, "invalid_input", "应用名称不能为空");
@@ -193,36 +179,12 @@ void appsCreate(const Request& req, Response& res) {
 
     std::string requestedOrg = util::trim(http::input(req, "organization_id"));
     std::string organizationId;
-    if (user.isAdmin || user.isSuperAdmin) {
-        organizationId = requestedOrg.empty() ? constants::kDefaultOrganizationId : requestedOrg;
-        auto org = Db::query("SELECT id FROM organizations WHERE id=" +
-                             Db::quote(organizationId) + " LIMIT 1");
-        if (org.empty()) {
-            http::error(res, 400, "invalid_organization", "组织不存在");
-            return;
-        }
-    } else {
-        auto orgs = Db::query(
-            "SELECT organization_id FROM organization_members WHERE user_id=" +
-            Db::quote(user.id) +
-            " ORDER BY FIELD(role,'admin','developer','member'), created_at");
-        if (orgs.empty()) {
-            http::error(res, 403, "org_member_required",
-                        "请先在「组织」页面申请加入一个组织，通过后即可在该组织下注册应用");
-            return;
-        }
-        bool allowed = false;
-        for (const auto& row : orgs) {
-            if (requestedOrg.empty() || row.at("organization_id") == requestedOrg) {
-                organizationId = row.at("organization_id");
-                allowed = true;
-                break;
-            }
-        }
-        if (!allowed) {
-            http::error(res, 403, "forbidden_organization", "你不是该组织的管理员或开发者");
-            return;
-        }
+    organizationId = requestedOrg.empty() ? constants::kDefaultOrganizationId : requestedOrg;
+    auto org = Db::query("SELECT id FROM organizations WHERE id=" +
+                         Db::quote(organizationId) + " LIMIT 1");
+    if (org.empty()) {
+        http::error(res, 400, "invalid_organization", "组织不存在");
+        return;
     }
     bool confidential = true;
     std::string confidentialInput = http::input(req, "is_confidential");
@@ -302,6 +264,7 @@ void appsUpdate(const Request& req, Response& res) {
     std::vector<std::string> redirectUris = http::inputArray(req, "redirect_uris");
     std::vector<std::string> allowedScopes = http::inputArray(req, "allowed_scopes");
     std::string active = http::input(req, "is_active");
+    std::string m2m = http::input(req, "m2m_enabled");
 
     if (name.empty()) name = app->name;
     if (description.empty()) description = app->description;
@@ -324,6 +287,8 @@ void appsUpdate(const Request& req, Response& res) {
     bool scopesChanged = allowedScopes != app->allowedScopes;
     bool isActive = app->isActive;
     if (!active.empty()) isActive = active != "false" && active != "0";
+    bool m2mEnabled = app->m2mEnabled;
+    if (!m2m.empty()) m2mEnabled = m2m != "false" && m2m != "0";
 
     std::string sql =
         "UPDATE applications SET name=" + Db::quote(name) +
@@ -333,6 +298,7 @@ void appsUpdate(const Request& req, Response& res) {
         ", homepage_url=" + Db::nullable(homepage) +
         ", icon=" + Db::nullable(icon) +
         ", is_active=" + (isActive ? "1" : "0") +
+        ", m2m_enabled=" + (m2mEnabled ? "1" : "0") +
         ", updated_at=NOW() WHERE id=" + Db::quote(app->id);
     if (Db::exec(sql) < 0) {
         http::error(res, 500, "update_failed", "应用更新失败");

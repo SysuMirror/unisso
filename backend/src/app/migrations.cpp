@@ -1,8 +1,15 @@
 #include "core.h"
 
+#include <cstdlib>
 #include <iostream>
+#include <sstream>
 
 namespace {
+
+std::string configuredSuperAdminIds() {
+    if (const char* env = std::getenv("UNISSO_SSE_SUPER_ADMIN_IDS"); env && *env) return env;
+    return "561";
+}
 
 void runSql(const std::string& sql, const char* label) {
     if (Db::exec(sql) < 0) {
@@ -36,6 +43,8 @@ void run() {
     addColumn("users", "is_super_admin", "TINYINT(1) NOT NULL DEFAULT 0");
     addColumn("users", "step_up_enabled", "TINYINT(1) NOT NULL DEFAULT 0");
     addColumn("applications", "organization_id", "VARCHAR(36) NULL");
+    // Silent SSO (POST /api/oauth/password/verify) is granted per application.
+    addColumn("applications", "m2m_enabled", "TINYINT(1) NOT NULL DEFAULT 0");
     // JSON array: IPs a trusted browser has recently authenticated from.
     // Device trust is bound to these, not just to the device cookie.
     addColumn("trusted_devices", "known_ips", "TEXT NULL");
@@ -55,6 +64,19 @@ CREATE TABLE IF NOT EXISTS migration_flags (
         // must not undo deliberate opt-ins, hence the flag guard.
         runSql("UPDATE users SET step_up_enabled=0 WHERE step_up_enabled=1 AND is_admin=0",
                "opt out non-admin users from step-up (one time)");
+    }
+
+    // One-time import of the clients that used to live only in the
+    // UNISSO_PASSWORD_VERIFY_CLIENTS environment allow-list. Afterwards the
+    // switch is owned by the admin console (applications.m2m_enabled).
+    if (Db::exec("INSERT IGNORE INTO migration_flags (name) VALUES ('applications_m2m_enabled_2026_11')") == 1) {
+        runSql("UPDATE applications SET m2m_enabled=1, updated_at=NOW() WHERE client_id IN ("
+               "'app_4d5b4228022b4a97','app_d12284c26f111821','app_06af4e375c2bf9e8',"
+               "'app_0e8d723ab1f092dd','app_cf99748456d9868b','app_94cf23fcb41d331c',"
+               "'app_ddf5640acd86457e','app_2262d080be9e0bab','app_2f85bb569c1deb5f',"
+               "'app_c992d5d1472fc541','app_85bf3cb652742920','sseinfra',"
+               "'client_ufYz8oTtUc3VqerdW8TpGg')",
+               "seed m2m enabled applications (one time)");
     }
 
     runSql(R"SQL(
@@ -263,9 +285,6 @@ CREATE TABLE IF NOT EXISTS org_join_requests (
     runSql("INSERT IGNORE INTO organizations (id,name,slug,description,created_at,updated_at) VALUES (" +
                Db::quote(org) + ",'SSE','sse','默认组织',NOW(),NOW())",
            "seed default organization");
-    runSql("INSERT IGNORE INTO role_assignments (id,subject_type,subject_id,role,created_at) VALUES (" +
-               Db::quote(util::uuid4()) + ",'sse_user_id','561','super_admin',NOW())",
-           "seed super admin 561");
 
     runSql("INSERT IGNORE INTO organization_members (id,organization_id,user_id,role,created_at) "
            "SELECT UUID()," + Db::quote(org) + ",id,IF(is_admin=1,'admin','member'),NOW() FROM users",
@@ -277,10 +296,33 @@ CREATE TABLE IF NOT EXISTS org_join_requests (
            "SELECT id," + Db::quote(org) + " FROM applications",
            "migrate application_organizations");
 
-    runSql("UPDATE users SET is_super_admin=1, is_admin=1 "
-           "WHERE sse_user_id COLLATE utf8mb4_unicode_ci = "
-           "_utf8mb4'561' COLLATE utf8mb4_unicode_ci",
-           "seed super admin 561 flag");
+    // Bootstrapped super admins come from UNISSO_SSE_SUPER_ADMIN_IDS; "-1"
+    // disables the automatic promotion (the admin console owns the flags).
+    std::string superIdList;
+    {
+        std::stringstream stream(configuredSuperAdminIds());
+        std::string item;
+        while (std::getline(stream, item, ',')) {
+            item = util::trim(item);
+            if (item.empty() || item == "-1") continue;
+            if (!superIdList.empty()) superIdList += ",";
+            superIdList += Db::quote(item);
+        }
+    }
+    if (!superIdList.empty()) {
+        runSql("UPDATE users SET is_super_admin=1, is_admin=1 WHERE sse_user_id IN (" +
+                   superIdList + ")",
+               "seed super admin from UNISSO_SSE_SUPER_ADMIN_IDS");
+    }
+    // loadUserRelations() re-applies super_admin from role_assignments on every
+    // user load, so a stale marketplace-id grant outlives the flags above.
+    // Drop the ones that are no longer configured (one time).
+    if (Db::exec("INSERT IGNORE INTO migration_flags (name) VALUES ('super_admin_sse_ids_2026_11')") == 1) {
+        std::string sql =
+            "DELETE FROM role_assignments WHERE subject_type='sse_user_id' AND role='super_admin'";
+        if (!superIdList.empty()) sql += " AND subject_id NOT IN (" + superIdList + ")";
+        runSql(sql, "drop stale sse super admin role assignments (one time)");
+    }
     runSql("UPDATE users SET is_super_admin=1, is_admin=1 "
            "WHERE id COLLATE utf8mb4_unicode_ci IN ("
            "SELECT subject_id COLLATE utf8mb4_unicode_ci FROM role_assignments "

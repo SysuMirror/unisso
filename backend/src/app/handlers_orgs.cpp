@@ -6,15 +6,11 @@
 
 namespace {
 
-std::string orgRole(const User& user, const std::string& orgId) {
-    auto rows = Db::query("SELECT role FROM organization_members WHERE organization_id=" +
-                          Db::quote(orgId) + " AND user_id=" + Db::quote(user.id) + " LIMIT 1");
-    return rows.empty() ? "" : rows.front().at("role");
-}
-
-bool canAdminOrg(const User& user, const std::string& orgId) {
-    if (user.isSuperAdmin || user.isAdmin) return true;
-    return orgRole(user, orgId) == "admin";
+// Organization management is part of the single-account admin console.
+// Organization roles are still stored/displayed, but only the super admin
+// may administer an organization.
+bool canAdminOrg(const User& user, const std::string&) {
+    return user.isSuperAdmin;
 }
 
 bool validRole(const std::string& role) {
@@ -161,19 +157,18 @@ void organizationsList(const Request& req, Response& res) {
         obj["member_count"] = jsonx::num(members);
         obj["joined"] = JsonValue(row.count("role") && !row.at("role").empty());
         obj["request_status"] = JsonValue(row.count("request_status") ? row.at("request_status") : "");
-        obj["can_admin"] = JsonValue(user.isSuperAdmin || user.isAdmin ||
-                                     (row.count("role") && row.at("role") == "admin"));
+        obj["can_admin"] = JsonValue(user.isSuperAdmin);
         items.push_back(JsonValue(obj));
     }
     http::json(res, 200, JsonValue(std::map<std::string, JsonValue>{
                              {"ok", JsonValue(true)}, {"organizations", JsonValue(items)},
-                             {"is_super_admin", JsonValue(user.isSuperAdmin || user.isAdmin)}}));
+                             {"is_super_admin", JsonValue(user.isSuperAdmin)}}));
 }
 
 void organizationsCreate(const Request& req, Response& res) {
     User user;
     if (!authx::requireUser(req, res, user)) return;
-    if (!user.isSuperAdmin && !user.isAdmin) {
+    if (!user.isSuperAdmin) {
         http::error(res, 403, "super_admin_required", "只有超级管理员可以新建组织");
         return;
     }
@@ -400,27 +395,17 @@ void orgJoinRequestsMine(const Request& req, Response& res) {
                              {"ok", JsonValue(true)}, {"requests", JsonValue(items)}}));
 }
 
-// GET /api/org-join-requests — pending applications the caller may approve
-// (super admins see all; org admins see their orgs' requests).
+// GET /api/org-join-requests — pending applications. Only the super admin
+// reviews them; everyone else gets an empty list (their own applications
+// live in /api/org-join-requests/mine).
 void orgJoinRequestsPending(const Request& req, Response& res) {
     User user;
     if (!authx::requireUser(req, res, user)) return;
     std::vector<JsonValue> items;
-    if (user.isSuperAdmin || user.isAdmin) {
+    if (user.isSuperAdmin) {
         auto rows = Db::query(joinRequestSql("jr.status='pending'") +
                               "ORDER BY jr.created_at ASC LIMIT 200");
         for (const auto& row : rows) items.push_back(joinRequestJson(row));
-    } else {
-        auto mine = Db::query("SELECT 1 FROM organization_members WHERE user_id=" +
-                              Db::quote(user.id) + " AND role='admin' LIMIT 1");
-        if (!mine.empty()) {
-            auto rows = Db::query(
-                joinRequestSql("jr.status='pending' AND jr.organization_id IN ("
-                               "SELECT organization_id FROM organization_members WHERE user_id=" +
-                               Db::quote(user.id) + " AND role='admin')") +
-                "ORDER BY jr.created_at ASC LIMIT 200");
-            for (const auto& row : rows) items.push_back(joinRequestJson(row));
-        }
     }
     http::json(res, 200, JsonValue(std::map<std::string, JsonValue>{
                              {"ok", JsonValue(true)}, {"requests", JsonValue(items)},

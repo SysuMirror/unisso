@@ -74,6 +74,7 @@ Application mapApplication(const std::map<std::string, std::string>& row) {
     app.callbackUrl = get("callback_url");
     app.isActive = isTrue(get("is_active"));
     app.isConfidential = isTrue(get("is_confidential"));
+    app.m2mEnabled = isTrue(get("m2m_enabled"));
     app.ownerId = get("owner_id");
     app.organizationId = get("organization_id");
     app.createdAt = get("created_at");
@@ -110,6 +111,18 @@ namespace repo {
 std::optional<User> findUserByEmail(const std::string& email) {
     auto rows = Db::query("SELECT * FROM users WHERE email=" + Db::quote(util::lower(util::trim(email))) +
                           " LIMIT 1");
+    if (rows.empty()) return std::nullopt;
+    User user = mapUser(rows.front());
+    loadUserRelations(user);
+    return user;
+}
+
+std::optional<User> findUserByUsername(const std::string& username) {
+    std::string value = util::trim(username);
+    if (value.empty()) return std::nullopt;
+    // username carries a unique index with the table's case-insensitive
+    // collation, so casing does not matter here.
+    auto rows = Db::query("SELECT * FROM users WHERE username=" + Db::quote(value) + " LIMIT 1");
     if (rows.empty()) return std::nullopt;
     User user = mapUser(rows.front());
     loadUserRelations(user);
@@ -453,6 +466,7 @@ JsonValue applicationJson(const Application& app, bool withSecret) {
     obj["callback_url"] = JsonValue(app.callbackUrl);
     obj["is_active"] = JsonValue(app.isActive);
     obj["is_confidential"] = JsonValue(app.isConfidential);
+    obj["m2m_enabled"] = JsonValue(app.m2mEnabled);
     obj["owner_id"] = JsonValue(app.ownerId);
     obj["organization_id"] = JsonValue(app.organizationId);
     obj["created_at"] = JsonValue(app.createdAt);

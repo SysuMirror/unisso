@@ -573,9 +573,12 @@ bool m2mAuthorized(const Request& req, Response& res, std::string& clientId) {
         oauthError(res, 401, "invalid_client");
         return false;
     }
+    // Silent SSO is enabled per application from the admin console. The
+    // environment allow-list is still honoured so existing deployments keep
+    // working until every client has been switched over in the database.
+    bool allowed = app->m2mEnabled;
     std::string allowRaw = util::env("UNISSO_PASSWORD_VERIFY_CLIENTS", "");
-    bool allowed = false;
-    if (!allowRaw.empty()) {
+    if (!allowed && !allowRaw.empty()) {
         std::stringstream stream(allowRaw);
         std::string item;
         while (std::getline(stream, item, ',')) {

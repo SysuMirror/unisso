@@ -22,7 +22,7 @@
       <div v-if="apps.length" class="table-wrap">
         <table class="table">
           <thead>
-            <tr><th>应用</th><th>组织</th><th>Client ID</th><th>类型</th><th>状态</th><th>Scopes</th><th>操作</th></tr>
+            <tr><th>应用</th><th>组织</th><th>Client ID</th><th>类型</th><th>状态</th><th>无感登录</th><th>Scopes</th><th>操作</th></tr>
           </thead>
           <tbody>
             <tr v-for="app in apps" :key="app.id">
@@ -46,6 +46,11 @@
               <td>
                 <span class="badge" :class="app.is_active ? 'badge-success' : 'badge-secondary'">
                   {{ app.is_active ? '启用' : '禁用' }}
+                </span>
+              </td>
+              <td>
+                <span class="badge" :class="app.m2m_enabled ? 'badge-success' : 'badge-secondary'">
+                  {{ app.m2m_enabled ? '开' : '关' }}
                 </span>
               </td>
               <td>
@@ -154,6 +159,14 @@
           <input :value="(detail.allowed_scopes || []).join(' ')" class="form-input" readonly />
         </div>
         <div class="form-group">
+          <label class="form-label">无感登录（M2M 密码校验）</label>
+          <label class="checkbox-line">
+            <input type="checkbox" :checked="detail.m2m_enabled" :disabled="savingM2m"
+                   @change="toggleM2m" />
+            <span>允许该应用用 client 凭据调用密码校验接口，实现平台间无感登录</span>
+          </label>
+        </div>
+        <div class="form-group">
           <label class="form-label">状态</label>
           <div class="tag-row">
             <span class="badge" :class="detail.is_active ? 'badge-success' : 'badge-secondary'">
@@ -207,15 +220,9 @@ const scopeCatalog = [
 
 const apps = ref([])
 const organizations = ref([])
-// Any joined organization (admin/developer/member) can host apps now.
-const manageableOrgs = computed(() => organizations.value.filter((org) =>
-  org.can_admin || (org.role && org.role.length > 0) || org.joined))
-const canManageApps = computed(() => {
-  const user = store.user
-  if (!user) return false
-  if (user.is_admin || user.is_super_admin) return true
-  return (user.organizations || []).length > 0
-})
+// The admin console is single-account: only the super admin manages apps.
+const manageableOrgs = computed(() => organizations.value)
+const canManageApps = computed(() => !!store.user?.is_super_admin)
 
 function orgName(id) {
   if (!id) return '—'
@@ -224,6 +231,7 @@ function orgName(id) {
 const loading = ref(true)
 const error = ref('')
 const submitting = ref(false)
+const savingM2m = ref(false)
 const showCreate = ref(false)
 const showDetail = ref(false)
 const showSecret = ref(false)
@@ -314,6 +322,27 @@ async function openDetail(app) {
     showDetail.value = true
   } catch (e) {
     error.value = e.message
+  }
+}
+
+async function toggleM2m(event) {
+  if (!detailId.value) return
+  const enabled = event.target.checked
+  savingM2m.value = true
+  error.value = ''
+  try {
+    const data = await api('/api/apps/' + detailId.value, {
+      method: 'PUT',
+      body: { m2m_enabled: enabled }
+    })
+    detail.value = data
+    const target = apps.value.find((app) => app.id === detailId.value)
+    if (target) target.m2m_enabled = data.m2m_enabled
+  } catch (e) {
+    error.value = e.message
+    event.target.checked = !enabled
+  } finally {
+    savingM2m.value = false
   }
 }
 

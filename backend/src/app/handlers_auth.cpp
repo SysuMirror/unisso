@@ -120,7 +120,10 @@ void csrfToken(const Request& req, Response& res) {
 }
 
 void authLogin(const Request& req, Response& res) {
-    std::string email = util::lower(util::trim(http::input(req, "email")));
+    // The "email" field accepts either an email address or a username.
+    // Locking and rate limiting stay keyed on the submitted identifier.
+    std::string identifier = util::trim(http::input(req, "email"));
+    std::string email = util::lower(identifier);
     std::string password = http::input(req, "password");
     std::string next = safeNextUrl(http::input(req, "next"));
     std::string ip = http::clientIp(req);
@@ -135,13 +138,17 @@ void authLogin(const Request& req, Response& res) {
         return;
     }
 
-    auto user = repo::findUserByEmail(email);
+    auto user = identifier.find('@') == std::string::npos
+        ? repo::findUserByUsername(identifier)
+        : repo::findUserByEmail(email);
     bool authenticated = user && user->isActive && password::verify(password, user->passwordHash);
     bool locallyAuthenticated = authenticated;
 
     // If the account is not known locally (or the local password does not
     // match), ask SSE. A successful SSE login means the user is 院内.
-    if (!authenticated && AppConfig::get().sseEnabled) {
+    // Marketplace credentials are always email addresses, so a username
+    // login never falls back to SSE.
+    if (!authenticated && AppConfig::get().sseEnabled && email.find('@') != std::string::npos) {
         sse::Profile profile;
         std::string sseError;
         if (sse::login(email, password, profile, sseError)) {

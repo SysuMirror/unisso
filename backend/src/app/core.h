@@ -261,6 +261,9 @@ struct Application {
     std::string callbackUrl;
     bool isActive = true;
     bool isConfidential = true;
+    // Whether platforms may call POST /api/oauth/password/verify with this
+    // client for silent SSO. Managed from the admin console.
+    bool m2mEnabled = false;
     std::string ownerId;
     std::string organizationId;
     std::string createdAt;
@@ -279,6 +282,7 @@ struct Consent {
 
 namespace repo {
 std::optional<User> findUserByEmail(const std::string& email);
+std::optional<User> findUserByUsername(const std::string& username);
 std::optional<User> findUserById(const std::string& id);
 std::optional<User> findUserBySseId(const std::string& sseUserId);
 std::vector<User> listUsers();
