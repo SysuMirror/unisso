@@ -4,9 +4,9 @@
       <div v-if="error" class="auth-error">{{ error }}</div>
 
       <label class="auth-field">
-        <span>邮箱</span>
-        <input id="login-email" v-model.trim="email" type="email" required autocomplete="email"
-               placeholder="you@example.com" autofocus />
+        <span>邮箱 / 用户名</span>
+        <input id="login-email" v-model.trim="email" type="text" required autocomplete="username"
+               placeholder="邮箱或用户名" autofocus />
       </label>
 
       <p v-if="qrEnabled" class="market-hint">
