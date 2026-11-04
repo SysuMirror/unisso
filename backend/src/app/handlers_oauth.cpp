@@ -1,7 +1,9 @@
 #include "core.h"
 
 #include <algorithm>
+#include <cstdlib>
 #include <regex>
+#include <sstream>
 
 namespace {
 
@@ -556,6 +558,176 @@ void oidcJwks(const Request&, Response& res) {
     res.body = RsJwt::jwks();
     res.headers["Content-Type"] = "application/json; charset=utf-8";
     res.headers["Cache-Control"] = "public, max-age=300";
+}
+
+namespace {
+
+bool m2mAuthorized(const Request& req, Response& res, std::string& clientId) {
+    std::string clientSecret = http::input(req, "client_secret");
+    auto basic = basicCredentials(req);
+    if (clientId.empty()) clientId = basic.first;
+    if (clientSecret.empty()) clientSecret = basic.second;
+    auto app = repo::findApplicationByClientId(clientId);
+    std::string clientError;
+    if (!app || !verifyClient(*app, clientSecret, clientError)) {
+        oauthError(res, 401, "invalid_client");
+        return false;
+    }
+    std::string allowRaw = util::env("UNISSO_PASSWORD_VERIFY_CLIENTS", "");
+    bool allowed = false;
+    if (!allowRaw.empty()) {
+        std::stringstream stream(allowRaw);
+        std::string item;
+        while (std::getline(stream, item, ',')) {
+            if (util::trim(item) == clientId) { allowed = true; break; }
+        }
+    }
+    if (!allowed) {
+        oauthError(res, 403, "password_verify_forbidden");
+        return false;
+    }
+    return true;
+}
+
+int ssoSessionHours() {
+    std::string raw = util::env("UNISSO_SSO_SESSION_HOURS", "168");
+    int hours = std::atoi(raw.c_str());
+    return hours > 0 ? hours : 168;
+}
+
+std::string ssoCookieDomain() {
+    return util::env("UNISSO_SSO_COOKIE_DOMAIN", ".ssemarket.cn");
+}
+
+std::string ssoCookieName() {
+    return util::env("UNISSO_SSO_COOKIE_NAME", "sse_sso");
+}
+
+JsonValue userClaimsJson(const User& user) {
+    std::map<std::string, JsonValue> u;
+    u["sub"] = JsonValue(user.id);
+    u["sso_sub"] = JsonValue(user.id);
+    u["sse_sub"] = user.sseUserId.empty() ? JsonValue() : JsonValue(user.sseUserId);
+    u["internal"] = JsonValue(user.isInternal);
+    u["preferred_username"] = JsonValue(user.username);
+    u["name"] = JsonValue(user.fullName);
+    u["email"] = JsonValue(user.email);
+    u["picture"] = JsonValue(user.avatar);
+    u["student_id"] = JsonValue(user.studentId);
+    return JsonValue(u);
+}
+
+void addSsoCookieMeta(std::map<std::string, JsonValue>& obj, const std::string& sid,
+                      long long expiresAt) {
+    obj["sso_session"] = JsonValue(sid);
+    obj["sso_cookie_name"] = JsonValue(ssoCookieName());
+    obj["sso_cookie_domain"] = JsonValue(ssoCookieDomain());
+    obj["sso_max_age"] = JsonValue(ssoSessionHours() * 3600);
+    obj["sso_expires_at"] = jsonx::num(expiresAt);
+}
+
+}  // namespace
+
+void oauthPasswordVerify(const Request& req, Response& res) {
+    std::string clientId = http::input(req, "client_id");
+    if (!m2mAuthorized(req, res, clientId)) return;
+
+    std::string email = util::lower(util::trim(http::input(req, "email")));
+    std::string password = http::input(req, "password");
+    if (email.empty() || password.empty()) {
+        oauthError(res, 400, "invalid_request", "missing email or password");
+        return;
+    }
+
+    std::string ip = http::clientIp(req);
+    std::string key = "pwverify_attempts:" + ip + ":" + email;
+    long long attempts = Cache::incr(key, 900);
+    if (attempts > 5) {
+        oauthError(res, 429, "too_many_attempts", "尝试次数过多，请稍后再试");
+        return;
+    }
+
+    auto user = repo::findUserByEmail(email);
+    if (!user || user->passwordHash.empty() ||
+        !password::verify(password, user->passwordHash) || !user->isActive) {
+        oauthError(res, 401, "invalid_credentials", "邮箱或密码错误");
+        return;
+    }
+    Cache::del(key);
+
+    int hours = ssoSessionHours();
+    std::string sid = authx::createSession(user->id, user->username, req, "", hours);
+
+    std::map<std::string, JsonValue> obj;
+    obj["ok"] = JsonValue(true);
+    obj["user"] = userClaimsJson(*user);
+    addSsoCookieMeta(obj, sid, util::nowEpoch() + static_cast<long long>(hours) * 3600);
+    http::ok(res, JsonValue(obj));
+}
+
+void oauthSessionVerify(const Request& req, Response& res) {
+    std::string clientId = http::input(req, "client_id");
+    if (!m2mAuthorized(req, res, clientId)) return;
+
+    std::string sid = util::trim(http::input(req, "session"));
+    if (sid.empty()) {
+        oauthError(res, 400, "invalid_request", "missing session");
+        return;
+    }
+    std::string raw = Cache::get("session:" + sid);
+    if (raw.empty()) {
+        oauthError(res, 401, "invalid_session");
+        return;
+    }
+    std::map<std::string, JsonValue> data;
+    if (!jsonx::parseObject(raw, data)) {
+        oauthError(res, 401, "invalid_session");
+        return;
+    }
+    std::string userId = jsonx::getString(data, "user_id");
+    long long expiresAt = 0;
+    auto expIt = data.find("expires_at");
+    if (expIt != data.end() && expIt->second.getType() == JsonValue::NUMBER) {
+        expiresAt = static_cast<long long>(expIt->second.asNumber());
+    }
+    if (userId.empty() || (expiresAt > 0 && expiresAt <= util::nowEpoch())) {
+        Cache::del("session:" + sid);
+        oauthError(res, 401, "invalid_session");
+        return;
+    }
+    auto user = repo::findUserById(userId);
+    if (!user || !user->isActive) {
+        oauthError(res, 401, "invalid_session");
+        return;
+    }
+
+    int hours = ssoSessionHours();
+    long long now = util::nowEpoch();
+    long long nextExpiry = now + static_cast<long long>(hours) * 3600;
+    data["last_seen_at"] = jsonx::num(now);
+    data["expires_at"] = jsonx::num(nextExpiry);
+    Cache::setJson("session:" + sid, jsonx::dump(data), hours * 3600);
+
+    std::map<std::string, JsonValue> obj;
+    obj["ok"] = JsonValue(true);
+    obj["user"] = userClaimsJson(*user);
+    addSsoCookieMeta(obj, sid, nextExpiry);
+    http::ok(res, JsonValue(obj));
+}
+
+void oauthSessionRevoke(const Request& req, Response& res) {
+    std::string clientId = http::input(req, "client_id");
+    if (!m2mAuthorized(req, res, clientId)) return;
+
+    std::string sid = util::trim(http::input(req, "session"));
+    if (sid.empty()) {
+        oauthError(res, 400, "invalid_request", "missing session");
+        return;
+    }
+    Cache::del("session:" + sid);
+    std::map<std::string, JsonValue> obj;
+    obj["ok"] = JsonValue(true);
+    http::ok(res, JsonValue(obj));
 }
 
 }  // namespace handlers

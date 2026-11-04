@@ -1299,8 +1299,10 @@ std::vector<std::string> configStringList(const std::string& raw) {
 namespace authx {
 
 std::string createSession(const std::string& userId, const std::string& username,
-                          const Request& req, const std::string& deviceHash) {
+                          const Request& req, const std::string& deviceHash,
+                          int ttlHours) {
     auto& cfg = AppConfig::get();
+    int hours = ttlHours > 0 ? ttlHours : cfg.sessionHours;
     std::string id = "sess_" + util::randomHex(16);
     std::string ua = http::header(req, "User-Agent");
     if (ua.size() > 255) ua.resize(255);
@@ -1312,9 +1314,9 @@ std::string createSession(const std::string& userId, const std::string& username
     data["ip"] = JsonValue(http::clientIp(req));
     data["created_at"] = JsonValue(util::nowIso());
     data["last_seen_at"] = jsonx::num(now);
-    data["expires_at"] = jsonx::num(now + static_cast<long long>(cfg.sessionHours) * 3600);
+    data["expires_at"] = jsonx::num(now + static_cast<long long>(hours) * 3600);
     if (!deviceHash.empty()) data["device_hash"] = JsonValue(deviceHash);
-    Cache::setJson("session:" + id, jsonx::dump(data), cfg.sessionHours * 3600);
+    Cache::setJson("session:" + id, jsonx::dump(data), hours * 3600);
     return id;
 }
 
@@ -1545,7 +1547,10 @@ bool validateCsrf(const Request& req, Response& res) {
     std::string method = req.method;
     if (method == "GET" || method == "HEAD" || method == "OPTIONS") return true;
     if (req.path == "/api/oauth/token" || req.path == "/api/oauth/introspect" ||
-        req.path == "/api/logs/client") return true;
+        req.path == "/api/logs/client" ||
+        req.path == "/api/oauth/password/verify" ||
+        req.path == "/api/oauth/session/verify" ||
+        req.path == "/api/oauth/session/revoke") return true;
 
     auto& cfg = AppConfig::get();
     std::vector<std::string> allowed;

@@ -406,7 +406,8 @@ std::string originOf(const std::string& url);
 
 namespace authx {
 std::string createSession(const std::string& userId, const std::string& username,
-                          const Request& req, const std::string& deviceHash = "");
+                          const Request& req, const std::string& deviceHash = "",
+                          int ttlHours = 0);
 std::optional<std::string> sessionId(const Request& req);
 std::optional<User> currentUser(const Request& req);
 bool requireUser(const Request& req, Response& res, User& out);
@@ -472,6 +473,9 @@ void oauthAuthorize(const Request& req, Response& res);
 void oauthToken(const Request& req, Response& res);
 void oauthIntrospect(const Request& req, Response& res);
 void oauthUserinfo(const Request& req, Response& res);
+void oauthPasswordVerify(const Request& req, Response& res);
+void oauthSessionVerify(const Request& req, Response& res);
+void oauthSessionRevoke(const Request& req, Response& res);
 void oidcDiscovery(const Request& req, Response& res);
 void oidcJwks(const Request& req, Response& res);
 
