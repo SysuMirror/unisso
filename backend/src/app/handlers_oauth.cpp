@@ -603,7 +603,7 @@ std::string ssoCookieDomain() {
 }
 
 std::string ssoCookieName() {
-    return util::env("UNISSO_SSO_COOKIE_NAME", "sse_sso");
+    return util::env("UNISSO_SSO_COOKIE_NAME", "unisso_sid");
 }
 
 JsonValue userClaimsJson(const User& user) {
