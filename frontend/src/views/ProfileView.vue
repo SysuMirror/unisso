@@ -385,7 +385,7 @@ async function uploadAvatar(event) {
 /* Meta strip. */
 .pmeta {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   border-bottom: 1px solid var(--line);
 }
 .pmeta-cell { padding: 14px 18px; border-right: 1px solid var(--line-soft); min-width: 0; }
@@ -401,14 +401,8 @@ async function uploadAvatar(event) {
 }
 .pmeta-value { display: block; margin-top: 5px; font-size: 12.5px; color: var(--ink); word-break: break-all; }
 
-/* Two-column workspace. */
-.pgrid {
-  display: grid;
-  grid-template-columns: minmax(0, 1.55fr) minmax(280px, .45fr);
-  align-items: start;
-}
-.pgrid-main { padding: 4px 40px 0 0; border-right: 1px solid var(--line); min-width: 0; }
-.pgrid-side { padding: 4px 0 0 40px; min-width: 0; }
+/* Sections stack full width. */
+.pgrid-main { padding: 4px 0 0; min-width: 0; }
 
 .psec { padding: 22px 0; }
 .psec + .psec { border-top: 1px solid var(--line-soft); }
@@ -433,7 +427,7 @@ async function uploadAvatar(event) {
 .prow-side { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; flex: 0 0 auto; }
 .prow-side-badges { flex-direction: row; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
 
-/* Sessions sits full width under the grid. */
+/* Sessions sits full width under the sections. */
 .psessions { margin-top: 4px; }
 
 @media (max-width: 900px) {
@@ -445,9 +439,6 @@ async function uploadAvatar(event) {
   .pmeta-cell:nth-child(2n) { border-right: 0; }
   .pmeta-cell:nth-child(n+3) { border-top: 1px solid var(--line-soft); }
   .pmeta-cell:first-child { padding-left: 14px; }
-  .pgrid { grid-template-columns: 1fr; }
-  .pgrid-main { border-right: 0; padding-right: 0; }
-  .pgrid-side { padding-left: 0; border-top: 1px solid var(--line); margin-top: 2px; }
   .prow-side { flex-direction: row; align-items: center; }
   .prow { flex-wrap: wrap; }
 }
