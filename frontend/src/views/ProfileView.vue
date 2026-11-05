@@ -49,10 +49,6 @@
           <span class="pmeta-value">{{ user.student_id || '未设置' }}</span>
         </div>
         <div class="pmeta-cell">
-          <span class="pmeta-label">集市账号</span>
-          <span class="pmeta-value">{{ identities.length ? '已绑定' : '未绑定' }}</span>
-        </div>
-        <div class="pmeta-cell">
           <span class="pmeta-label">已授权应用</span>
           <span class="pmeta-value">{{ consents.length }}</span>
         </div>
@@ -112,31 +108,6 @@
           </section>
         </div>
 
-        <aside class="pgrid-side">
-          <section class="psec">
-            <div class="section-head">
-              <div>
-                <h2 class="section-title">集市账号</h2>
-                <p class="section-sub">绑定后可用集市身份登录。</p>
-              </div>
-              <button v-if="!identities.length" class="btn btn-secondary btn-sm" type="button"
-                      @click="startSseBind">绑定</button>
-            </div>
-            <div v-if="identities.length" class="pstack">
-              <div v-for="identity in identities" :key="identity.id" class="prow">
-                <div class="prow-main">
-                  <div class="prow-title">{{ identity.provider_username || identity.provider_user_id }}</div>
-                  <div v-if="identity.provider_email" class="prow-desc">{{ identity.provider_email }}</div>
-                  <div class="prow-date">{{ formatDate(identity.created_at) }} 绑定</div>
-                </div>
-                <div class="prow-side">
-                  <button class="btn btn-danger btn-sm" type="button" @click="unbind(identity)">解绑</button>
-                </div>
-              </div>
-            </div>
-            <div v-else class="compact-empty">暂无绑定的集市账号。</div>
-          </section>
-        </aside>
       </div>
 
       <div class="psessions">
@@ -217,7 +188,6 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
-import { useRoute } from 'vue-router'
 import Modal from '../components/Modal.vue'
 import SessionsSection from '../components/SessionsSection.vue'
 import { api } from '../api'
@@ -232,13 +202,10 @@ const profileSaving = ref(false)
 const profileError = ref('')
 const profileForm = reactive({ full_name: '', student_id: '' })
 const user = computed(() => store.user)
-const identities = computed(() => store.user?.identities || [])
 const initial = computed(() => {
   const u = store.user
   return ((u?.full_name || u?.username || u?.email || '?').slice(0, 1) || '?').toUpperCase()
 })
-
-const route = useRoute()
 
 const scopeCatalog = [
   { name: 'openid', description: '基础身份标识' },
@@ -360,24 +327,8 @@ async function revokeConsent(consent) {
   }
 }
 
-async function startSseBind() {
-  error.value = ''
-  notice.value = ''
-  try {
-    const data = await api('/api/auth/sse/bind/start')
-    if (data?.authorize_url) {
-      window.location.assign(data.authorize_url)
-    } else {
-      error.value = '绑定入口暂不可用'
-    }
-  } catch (e) {
-    error.value = e.message
-  }
-}
 
 onMounted(() => {
-  if (route.query.bind === 'success') notice.value = '集市账号绑定成功。'
-  else if (route.query.bind === 'conflict') error.value = '该集市账号已绑定其他账号。'
   loadPermissions()
 })
 
@@ -408,16 +359,6 @@ async function uploadAvatar(event) {
   }
 }
 
-async function unbind(identity) {
-  if (!confirm(`确定要解绑该集市账号吗？`)) return
-  error.value = ''
-  try {
-    await api('/api/identities/' + identity.id, { method: 'DELETE' })
-    await loadMe(true)
-  } catch (e) {
-    error.value = e.message
-  }
-}
 </script>
 
 <style scoped>

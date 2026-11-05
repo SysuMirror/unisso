@@ -537,7 +537,6 @@ void sseQrStatus(const Request& req, Response& res);
 void sseQrStart(const Request& req, Response& res);
 void sseQrPoll(const Request& req, Response& res);
 void sseOauthCallback(const Request& req, Response& res);
-void sseBindStart(const Request& req, Response& res);
 void qrLoginStart(const Request& req, Response& res);
 void qrLoginPoll(const Request& req, Response& res);
 void qrLoginScan(const Request& req, Response& res);

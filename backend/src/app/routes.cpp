@@ -21,7 +21,6 @@ void registerAll(Server& app) {
     app.post("/api/auth/register", handlers::authRegister);
     app.post("/api/auth/verify-email", handlers::authVerify);
     app.post("/api/auth/resend-registration", handlers::authResend);
-    app.get("/api/auth/sse/bind/start", handlers::sseBindStart);
     app.post("/api/logs/client", handlers::clientLog);
     app.get("/api/admin/logs", handlers::adminLogsList);
     app.get("/api/admin/logs/{file}", handlers::adminLogsTail);

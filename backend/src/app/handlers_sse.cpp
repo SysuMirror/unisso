@@ -180,25 +180,6 @@ void sseQrPoll(const Request& req, Response& res) {
     http::json(res, 200, JsonValue(obj));
 }
 
-void sseBindStart(const Request& req, Response& res) {
-    User user;
-    if (!authx::requireUser(req, res, user)) return;
-    auto& cfg = AppConfig::get();
-    if (!cfg.sseOauthEnabled) {
-        http::error(res, 501, "sse_oauth_not_configured", "集市账号绑定尚未配置");
-        return;
-    }
-    std::string state = util::randomToken(24);
-    std::map<std::string, JsonValue> pending;
-    pending["user_id"] = JsonValue(user.id);
-    pending["created_at"] = jsonx::num(util::nowEpoch());
-    Cache::setJson("sse_bind:" + state, jsonx::dump(pending), 300);
-    std::map<std::string, JsonValue> obj;
-    obj["state"] = JsonValue(state);
-    obj["authorize_url"] = JsonValue(sse::authorizeUrl(state));
-    http::json(res, 200, JsonValue(obj));
-}
-
 void sseOauthCallback(const Request& req, Response& res) {
     std::string error = http::query(req, "error");
     if (!error.empty()) {
@@ -209,45 +190,6 @@ void sseOauthCallback(const Request& req, Response& res) {
     std::string code = http::query(req, "code");
     if (!validState(state) || code.empty()) {
         html(res, 400, errorHtml("缺少授权参数，请重新扫码。"));
-        return;
-    }
-    // Binding an SSE identity to an already logged-in local account.
-    std::string bindRaw = Cache::get("sse_bind:" + state);
-    if (!bindRaw.empty()) {
-        std::map<std::string, JsonValue> bindData;
-        std::string bindUser = jsonx::parseObject(bindRaw, bindData)
-            ? jsonx::getString(bindData, "user_id") : "";
-        if (bindUser.empty()) {
-            Cache::del("sse_bind:" + state);
-            html(res, 400, errorHtml("绑定请求已失效，请重新发起。"));
-            return;
-        }
-        auto current = authx::currentUser(req);
-        if (!current || current->id != bindUser) {
-            html(res, 403, errorHtml("请在同一浏览器完成账号绑定。"));
-            return;
-        }
-        if (!Cache::setnx("sse_bind_claim:" + state, "1", 300)) {
-            html(res, 409, errorHtml("绑定请求已处理，请重新发起。"));
-            return;
-        }
-        sse::Profile profile;
-        std::string sseError;
-        if (!sse::exchangeOauthCode(code, profile, sseError)) {
-            html(res, 502, errorHtml("集市账号信息获取失败，请重试。"));
-            return;
-        }
-        std::string bindError;
-        // Relative redirects only: the session/state cookies belong to the
-        // origin the browser actually used (issuer and the platform relay URL
-        // can be different hosts, redirecting to issuer would drop cookies).
-        if (!sse::bindIdentityToUser(bindUser, profile, bindError)) {
-            Cache::del("sse_bind:" + state);
-            http::redirect(res, "/profile?bind=conflict");
-            return;
-        }
-        Cache::del("sse_bind:" + state);
-        http::redirect(res, "/profile?bind=success");
         return;
     }
 

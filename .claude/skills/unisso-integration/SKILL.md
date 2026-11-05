@@ -1,206 +1,52 @@
 ---
 name: unisso-integration
-description: Integrate an application with UniSSO (OAuth2/OIDC SSO) — register a client, implement Authorization Code + PKCE, read identity claims (sub/internal/roles), and handle the linked-account selector. UniSSO is identity-only; the application owns its own groups/roles/authorization.
+description: 把学院内部平台接入 UniSSO 无感登录（M2M 密码校验 + 共享会话 Cookie）。覆盖登录、静默 SSO、登出、错误契约、部署自检守则与验收清单。
 ---
 
-# UniSSO Integration Skill
+# UniSSO 内部平台无感登录接入
 
-Use this runbook when you need to add UniSSO login to an application or verify
-UniSSO identities/permissions in a backend service.
+内部平台（first-party）接入 = 后端 M2M 密码校验 + 共享会话 Cookie。用户永不跳转 unisso。
+UniSSO 只负责身份（sub/sse_sub/internal/name/email/picture）；权限与角色由各平台自行判定。
 
-UniSSO is an **identity provider**, not an authorization server for your app.
-It tells you who the user is (`sub`, profile, email, `internal`, `roles`); your
-application decides what that user may do. Do not wait for SSO user-group APIs.
-UniSSO has organizations, but they are only for **application ownership and
-application-admin/developer roles inside UniSSO**; they are not returned in
-tokens and are not your app's user groups.
+## 前置
 
-## 1. What UniSSO provides
+1. 在 https://sso.ssemarket.cn/admin/apps 由超管创建**内接**应用，拿到 client_id / client_secret（secret 只显示一次），打开"无感登录"开关（m2m_enabled，仅内接应用可用）。
+2. 凭据下发到平台后端 env/config。**唯一可信来源是运行实例的 env**；仓库里的 env/compose 值视为可能过期——重建容器/进程前先从运行实例取（docker inspect / /proc/PID/environ）。
 
-- Issuer: `https://sso.ssemarket.cn`
-- Discovery: `https://sso.ssemarket.cn/.well-known/openid-configuration`
-- JWKS: `https://sso.ssemarket.cn/.well-known/jwks.json`
-- Authorize: `https://sso.ssemarket.cn/authorize`
-- Token: `POST https://sso.ssemarket.cn/api/oauth/token`
-- UserInfo: `GET https://sso.ssemarket.cn/api/oauth/userinfo`
-- Introspect: `POST https://sso.ssemarket.cn/api/oauth/introspect`
-
-> Always start from discovery and use the `issuer` it returns.
-- Protocol: OAuth2 Authorization Code + **PKCE S256**; OIDC id_token (RS256).
-
-## 2. Register your application
-
-Sign in at `https://sso.ssemarket.cn`, join an organization on the **组织** page
-(`https://sso.ssemarket.cn/admin/orgs` — marketplace/集市 accounts auto-join the
-SSE org; others can apply and are approved by the org's admins or platform
-admins), then register the app in **应用管理**
-(`https://sso.ssemarket.cn/admin/apps`) or via the API. **Any organization
-member** may register apps under their org; the app is owned by that
-organization, and org admins/developers can also manage it. You can also ask an
-admin to register it for you.
-
-You need:
-
-| Field | Notes |
-|---|---|
-| name | shown on the consent page |
-| redirect URIs | **exact match**, `https://…` (or `http://localhost` / `http://127.0.0.1` for development); no `?`/`#` suffix |
-| allowed scopes | subset of `openid profile:username profile:name profile:avatar profile:student_id email roles` |
-| confidential | `true` ⇒ you get a `client_secret` (keep server-side) |
-| icon URL | optional; shown on the consent page |
-
-The `client_secret` is shown **once**. Store it in the server environment /
-secret manager, never in frontend code or git. If an app will be managed by an
-organization, register it under that organization so the org's admins/developers
-can manage it.
-
-## 3. Scopes → claims
-
-| Scope | UserInfo / id_token claims |
-|---|---|
-| `openid` | `sub`, `sso_sub`, `internal` (always returned); `sse_sub` when the account has an SSE login |
-| `profile:username` | `preferred_username` |
-| `profile:name` | `name` |
-| `profile:avatar` | `picture` |
-| `profile:student_id` | `student_id` |
-| `email` | `email`, `email_verified` |
-| `roles` | `roles` |
-
-`internal` is always returned: `true` = 院内 (SSE-verified), `false` = 院外.
-`sub` is the stable identity key. Do **not** use email as the primary key and
-do not auto-link accounts by email.
-
-### Two OAuth ids (may differ)
-
-- `sub` and `sso_sub` are the **UniSSO** user id and are identical. Use one of
-  them as your application's local key.
-- `sse_sub` is the **SSE Market** OAuth user id bound to that account. It is
-  only present when the account has an SSE login, and it is **not** guaranteed
-  to equal `sub`/`sso_sub`. Do not use `sse_sub` as a replacement for `sub`.
-- Both ids are returned in the token response, userinfo and id_token. When the
-  consent page selects a linked account, the ids describe that selected
-  account, not the account that opened the page.
-
-**There is no `groups`/`organizations` claim.** User groups, application roles
-and resource permissions are application-owned; store them in your own database
-and key them by `sub`.
-
-## 4. Linked accounts (symmetric, many-to-many)
-
-A UniSSO user may link **multiple** UniSSO accounts. There is **no master/sub
-relationship**: links are peer-to-peer and symmetric. If A links B, B sees A
-immediately; either side can unlink. A can also link C; B and C do not become
-linked to each other unless separately linked.
-
-Permissions are **not shared**. When a user with linked accounts authorizes
-your app, the consent page shows an account selector. The user chooses which
-account this **single authorization** is for; the token's `sub`, profile and
-permissions belong to that account. `accounts[].is_current` marks the account
-that opened the consent page; other entries are directly linked peers.
-
-Rules for your app:
-
-- Treat `sub`/`sso_sub` as the authoritative identity; there is no master account.
-- One authorization = one account. Do not try to aggregate permissions from
-  multiple linked accounts.
-- Re-authorize if the user wants to use a different account.
-- Never trust an email address alone to switch identities.
-
-## 5. Authorization Code + PKCE (server-side app)
-
-1. Generate `state` (random, one-time) and a PKCE verifier/challenge.
-2. Redirect the browser to:
+## 登录（无感主路径）
 
 ```
-GET https://sso.ssemarket.cn/authorize
-  ?response_type=code
-  &client_id=YOUR_CLIENT_ID
-  &redirect_uri=https://your-app.example.com/callback
-  &scope=openid%20profile%20email
-  &state=STATE
-  &code_challenge=CHALLENGE
-  &code_challenge_method=S256
+POST https://sso.ssemarket.cn/api/oauth/password/verify
+Content-Type: application/json
+{"client_id":"...","client_secret":"...","email":"...","password":"..."}
 ```
 
-3. On your callback, verify `state` and exchange the code **server-side**:
+- 200：`user{sub,sse_sub,internal,name,email,picture}` + `sso_session` + `sso_cookie_name/sso_cookie_domain/sso_max_age`
+- 平台按响应的 `sso_cookie_*` 三个字段种 Cookie（Domain=.ssemarket.cn，HttpOnly/Secure/Lax）。**以响应字段为准，不要硬编码名字**（2026-11-05 起默认名 `unisso_sid`，旧名 `sse_sso` 兜底到 2026-11-12）
+- 错误契约：401 `invalid_credentials`（邮箱或密码错误）／403 `password_verify_forbidden`（client 不合规：查 client_id 是否配错、应用是否内接且开关开启）／429 `too_many_attempts`（同 ip+email 5 败锁 15 分钟，勿自动重试）
+
+## 静默 SSO（换平台自动进）
 
 ```
-POST https://sso.ssemarket.cn/api/oauth/token
-Content-Type: application/x-www-form-urlencoded
-
-grant_type=authorization_code
-&code=CODE
-&redirect_uri=https://your-app.example.com/callback
-&client_id=YOUR_CLIENT_ID
-&client_secret=YOUR_SECRET
-&code_verifier=VERIFIER
+POST https://sso.ssemarket.cn/api/oauth/session/verify   （Cookie 值服务端校验）
+POST https://sso.ssemarket.cn/api/oauth/session/revoke   （登出）
 ```
 
-4. Read the identity:
+平台读 Cookie **先 `unisso_sid` 再 `sse_sso`**；登出两个名字都按 `Domain=.ssemarket.cn; Path=/; Max-Age=0` 清。
 
-```
-GET https://sso.ssemarket.cn/api/oauth/userinfo
-Authorization: Bearer ACCESS_TOKEN
-```
+## 前端 boot 规约（防"刷新才登录"）
 
-5. Upsert your local user by `sub`; store the claims you need. Create **your own**
-session. Do not store the UniSSO access token as your session.
+页面加载即发一次 sso/try，路由守卫/首屏渲染 await 探测结果；全站单飞（共享同一 Promise）。三态：ok→进登录态并用结果重渲染当前视图；401→落登录页；503/网络错误→**保留本地会话不踢人**。
 
-## 6. Token behavior
+## 部署守则
 
-- access token: RS256, ~60 minutes, includes `sub/client_id/scope/type/exp`.
-- token response includes top-level `sso_sub` and (if bound) `sse_sub`.
-- refresh token: ~7 days, rotated on refresh, one-time.
-- id_token: RS256; verify via JWKS and `iss`/`aud`.
-- Revocation: consent revocation invalidates tokens for that client.
-- `introspect` requires client authentication (`client_id` + `client_secret`;
-  public clients send only their `client_id`) and only returns tokens issued to
-  that client. It is not an anonymous token oracle.
+1. 重建/重启后必须跑部署自检：用本平台 client 真实调一次 password/verify（E2E 账号 music-e2e-test@ssemarket.cn / Test123456）必须 200，否则回滚镜像。集市机样板：/root/SSE_Market/deploy-check-sso.sh。
+2. unisso 403 日志带 `client= kind= m2m=` 一行，排错先看它。
+3. 凭据来源错误是历史事故主因（compose.yml 过期值导致全站 403），切记以运行实例为准。
 
-## 7. Security checklist
+## 验收清单
 
-- [ ] Keep `client_secret` server-side only.
-- [ ] Use PKCE S256 and a one-time `state`.
-- [ ] Exchange code and call userinfo from the server, over HTTPS.
-- [ ] Validate `iss`, `aud`, `exp`, signature (JWKS) and `sub`.
-- [ ] Map users by `sub`/`sso_sub`, not email; keep `sse_sub` as a separate
-      external id when integrating with SSE Market.
-- [ ] Do not log tokens, secrets or passwords.
-- [ ] Do not put tokens in URLs or localStorage if avoidable.
-- [ ] On logout, clear your own session; UniSSO logout does not invalidate your session.
-- [ ] Request only the scopes you need (never assume a `groups` scope exists).
-- [ ] Keep application roles/groups in your own database, keyed by `sub`.
-
-## 8. Error handling
-
-| Symptom | Likely cause |
-|---|---|
-| `invalid_client` | wrong client_id/secret or app disabled |
-| redirect mismatch | `redirect_uri` not exactly registered |
-| `invalid_grant` | code reused/expired, wrong verifier, wrong redirect |
-| userinfo 401 | token expired/revoked, app disabled, user disabled |
-| consent shows an account selector | the user has linked accounts; the chosen account is the identity |
-| `org_member_required` when registering an app | join an organization first (组织 page) |
-| introspect `invalid_client` | missing/wrong client credentials, or token belongs to another client |
-
-## 9. Developer checklist
-
-1. Register the app; save `client_id`/`client_secret`.
-2. Add the exact callback URL.
-3. Pick the minimum scopes (`openid profile email` is usually enough).
-4. Implement `/login` → authorize redirect and `/callback` → token + userinfo.
-5. Upsert by `sub`; show the chosen account if needed.
-6. Use `internal` for 院内/院外 if needed; implement your own roles/groups.
-7. Test: valid login, denied consent, state mismatch, expired code, wrong secret,
-   linked-account selector, logout.
-8. Add the issuer/JWKS endpoints to your allowlist if you run in a restricted network.
-
-## 10. Environment example
-
-```ini
-UNISSO_ISSUER=https://sso.ssemarket.cn
-UNISSO_CLIENT_ID=app_xxxxxxxx
-UNISSO_CLIENT_SECRET=********
-UNISSO_REDIRECT_URI=https://your-app.example.com/callback
-UNISSO_SCOPES=openid profile email
-```
+- password/verify：正确密码 200；错误密码 401；假 client 403
+- sso/try：无 Cookie 401 no_sso；假值双名 401 invalid_sso；真会话双名 200
+- 冷启动带真 Cookie：无刷新直进登录态（真实 Chrome）
+- 登出：双名都清；其它平台下次探测落登录页
