@@ -316,6 +316,9 @@ std::vector<std::string> effective(const std::vector<std::string>& requested,
 std::string description(const std::string& name);
 JsonValue userClaims(const User& user, const std::vector<std::string>& granted);
 JsonValue catalog();
+// Scopes accepted by the app registry's whitelist. Single source of truth for
+// /api/apps validation, OIDC discovery and the public developer portal.
+std::vector<std::string> whitelist();
 }  // namespace scopes
 
 // ===========================================================================
@@ -453,6 +456,14 @@ void oidcDiscovery(const Request& req, Response& res);
 void oidcJwks(const Request& req, Response& res);
 
 void appIntegrationSkill(const Request& req, Response& res);
+// Resolves the integration skill markdown for `kind` ("external" = third-party
+// 跳转授权, anything else = first-party 无感登录). Shared by the super-admin
+// download and the public docs endpoint; re-reads the file on every call.
+bool loadIntegrationSkillMarkdown(const std::string& kind, std::string& fileName,
+                                  std::string& content);
+// Public developer portal (no auth, read-only, no user data).
+void publicDocsMeta(const Request& req, Response& res);
+void publicDocsSkill(const Request& req, Response& res);
 void appsList(const Request& req, Response& res);
 void appsCreate(const Request& req, Response& res);
 void appsGet(const Request& req, Response& res);

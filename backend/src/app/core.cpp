@@ -842,6 +842,11 @@ std::vector<std::string> effective(const std::vector<std::string>& requested,
     return out;
 }
 
+std::vector<std::string> whitelist() {
+    return {"openid", "profile", "profile:username", "profile:name",
+            "profile:avatar", "profile:student_id", "email", "roles"};
+}
+
 std::string description(const std::string& name) {
     static const std::map<std::string, std::string> defs = {
         {"openid", "基础身份标识（用户唯一 ID）"},

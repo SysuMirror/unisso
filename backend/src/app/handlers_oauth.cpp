@@ -536,9 +536,7 @@ void oidcDiscovery(const Request&, Response& res) {
     obj["grant_types_supported"] = JsonValue(std::vector<std::string>{"authorization_code", "refresh_token"});
     obj["subject_types_supported"] = JsonValue(std::vector<std::string>{"public"});
     obj["id_token_signing_alg_values_supported"] = JsonValue(std::vector<std::string>{"RS256"});
-    obj["scopes_supported"] = JsonValue(std::vector<std::string>{
-        "openid", "profile", "profile:username", "profile:name", "profile:avatar",
-        "profile:student_id", "email", "roles"});
+    obj["scopes_supported"] = JsonValue(scopes::whitelist());
     obj["token_endpoint_auth_methods_supported"] = JsonValue(std::vector<std::string>{
         "client_secret_post", "client_secret_basic"});
     obj["code_challenge_methods_supported"] = JsonValue(std::vector<std::string>{"S256"});

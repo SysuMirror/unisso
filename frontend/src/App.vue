@@ -13,6 +13,8 @@
         </button>
 
         <nav class="nav" :class="{ 'is-open': mobileMenuOpen }">
+          <RouterLink to="/developer" class="nav-link" :class="{ 'is-active': route.path === '/developer' }">开放平台</RouterLink>
+          <RouterLink to="/docs" class="nav-link" :class="{ 'is-active': route.path === '/docs' }">开发者文档</RouterLink>
           <template v-if="store.user">
             <RouterLink to="/profile" class="nav-link" :class="{ 'is-active': route.path === '/profile' }">个人中心</RouterLink>
             <RouterLink v-if="store.user.is_super_admin" to="/admin/apps" class="nav-link" :class="{ 'is-active': route.path === '/admin/apps' }">应用</RouterLink>
@@ -47,6 +49,8 @@
         <span>统一身份认证</span>
         <span class="footer-meta">
           <RouterLink to="/privacy">隐私政策</RouterLink>
+          <span class="footer-dot">·</span>
+          <RouterLink to="/docs">开发者文档</RouterLink>
           <span class="footer-dot">·</span>
           安全登录
         </span>

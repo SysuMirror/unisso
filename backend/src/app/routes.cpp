@@ -51,6 +51,12 @@ void registerAll(Server& app) {
     app.get("/.well-known/openid-configuration", handlers::oidcDiscovery);
     app.get("/.well-known/jwks.json", handlers::oidcJwks);
 
+    // Public developer portal (no auth, GET-only, read-only): the third-party
+    // integration guide and the platform's published endpoint/scope metadata.
+    // The internal 无感登录 guide stays behind /api/apps/integration-skill.
+    app.get("/api/public/docs", handlers::publicDocsMeta);
+    app.get("/api/public/docs/skill", handlers::publicDocsSkill);
+
     // Applications: first-party (admin-managed) and third-party (apply/review).
     app.get("/api/apps/integration-skill", handlers::appIntegrationSkill);
     app.get("/api/apps", handlers::appsList);

@@ -228,6 +228,27 @@
 - token 响应、userinfo、id_token 都返回 `sso_sub` / `sse_sub`。
 - 账号选择器返回的 `accounts[].is_current` 标记打开同意页的账号；其余是直接关联账号。
 
+### 3.2 公开文档与开放平台（免登录）
+
+第三方开发者拿到 UniSSO 地址后无需账号即可查阅接入方式：
+
+- 页面（SPA 路由，站点导航与页脚均有入口）：
+  - `/docs` 开发者文档：在线渲染外部平台（跳转授权）接入说明，可直接下载 `SKILL.md`。
+  - `/developer` 开放平台：三类接入方式、端点速查、scope 白名单与含义、错误契约、
+    PKCE 快速开始；「申请接入」已登录跳个人中心、未登录跳登录页。
+- 公开只读接口（**不鉴权**，无用户数据、无副作用）：
+  - `GET /api/public/docs` — 发布元数据：`issuer`、`endpoints`
+    （authorize/token/userinfo/introspect/discovery/jwks）、`scopes` 与 `scope_catalog`、
+    `grants`、`code_challenge_methods`、`docs` 列表。
+  - `GET /api/public/docs/skill?kind=external` — 外部接入文档 markdown（inline 返回，
+    供页面直接渲染）；`kind` 只接受 `external`（缺省同），其它值一律 `400 invalid_request`。
+- **只公开外部（第三方跳转授权）那一篇**；内部/无感登录文档仍只由
+  `GET /api/apps/integration-skill`（应用管理者）下载，公开面不涉及内部接入细节。
+- 文档文件**每请求热读**，直接改
+  `.claude/skills/unisso-integration-external/SKILL.md` 即时生效（无需重启/重构建）。
+- scope 白名单、端点均取后端同一来源（`scopes::whitelist()` / `AppConfig`），
+  不会与 `/api/apps` 校验、OIDC discovery 漂移。
+
 ---
 
 ## 4. 人脸服务接入
@@ -429,7 +450,9 @@
 | POST | `/api/auth/step-up/device/{id}/decide` | 已登录设备允许/拒绝 |
 | POST | `/api/auth/step-up/cancel` | 取消二次验证 |
 | PUT | `/api/me/profile` | 修改当前账号显示名/学号；可切换 `step_up_enabled` |
-| GET | `/api/apps/integration-skill` | 下载 SSO 应用接入 Skill（仅应用管理者） |
+| GET | `/api/apps/integration-skill` | 下载 SSO 应用接入 Skill（仅应用管理者；`?kind=external` 取外部文档） |
+| GET | `/api/public/docs` | 公开：开放平台端点/scope 元数据（免登录） |
+| GET | `/api/public/docs/skill` | 公开：外部平台接入文档 markdown（免登录，只接受 `kind=external`） |
 | GET | `/api/account/sessions` | 当前账号的有效登录设备 |
 | DELETE | `/api/account/sessions/{id}` | 单独退出指定设备（不能退出当前设备；同时移除设备信任） |
 | POST | `/api/account/sessions/revoke-others` | 退出其他所有设备并移除对应信任 |
@@ -547,4 +570,7 @@ face:
 - 登记命中已有 person 时，必须验证当前账号邮箱后才关联。
 - 人脸照片不保存；本地只存关联和审计。
 - 账号关联对称多对多，不再有主/附属；OAuth 一次授权只选一个账号，权限不合并。
+- 公开面仅 `/docs`、`/developer` 两个页面与 `/api/public/docs*` 两条只读接口：
+  不鉴权但也不含任何用户数据、不接受写操作，发布的正是给第三方的外部接入文档；
+  内部接入文档仍需应用管理者身份下载。
 - 详细安全修复与残余风险见 `SECURITY.md`。

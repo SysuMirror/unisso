@@ -14,6 +14,8 @@ const AdminAppsView = () => import('./views/AdminAppsView.vue')
 const AdminUsersView = () => import('./views/AdminUsersView.vue')
 const AdminLogsView = () => import('./views/AdminLogsView.vue')
 const PrivacyView = () => import('./views/PrivacyView.vue')
+const DocsView = () => import('./views/DocsView.vue')
+const DeveloperView = () => import('./views/DeveloperView.vue')
 const NotFoundView = () => import('./views/NotFoundView.vue')
 
 const routes = [
@@ -27,6 +29,9 @@ const routes = [
   { path: '/consents', redirect: '/profile' },
   { path: '/authorize', name: 'authorize', component: AuthorizeView, meta: { requiresAuth: true } },
   { path: '/privacy', name: 'privacy', component: PrivacyView },
+  // Public developer portal — intentionally no meta: reachable logged out.
+  { path: '/docs', name: 'docs', component: DocsView },
+  { path: '/developer', name: 'developer', component: DeveloperView },
   { path: '/admin/apps', name: 'admin-apps', component: AdminAppsView, meta: { requiresAuth: true, requiresSuperAdmin: true } },
   { path: '/admin/users', name: 'admin-users', component: AdminUsersView, meta: { requiresAuth: true, requiresSuperAdmin: true } },
   { path: '/admin/logs', name: 'admin-logs', component: AdminLogsView, meta: { requiresAuth: true, requiresSuperAdmin: true } },

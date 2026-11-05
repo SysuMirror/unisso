@@ -7,7 +7,10 @@
       </div>
       <div class="page-head-actions">
         <a class="btn btn-secondary" href="/api/apps/integration-skill" download>
-          下载接入 Skill
+          下载接入 Skill（内接）
+        </a>
+        <a class="btn btn-secondary" href="/api/apps/integration-skill?kind=external" download>
+          下载接入 Skill（外部）
         </a>
         <button class="btn btn-primary" type="button" @click="openCreate">注册内接应用</button>
       </div>

@@ -16,6 +16,8 @@
 - Discovery：`https://sso.ssemarket.cn/.well-known/openid-configuration`
 - 人脸服务：`https://ai.ssemarket.cn/face`
 - 隐私政策：`https://sso.ssemarket.cn/privacy`（联系人：`ssemarket@163.com`）
+- 开发者文档：`https://sso.ssemarket.cn/docs`（免登录，外部平台跳转授权接入说明）
+- 开放平台：`https://sso.ssemarket.cn/developer`（免登录，端点/scope 速查与申请入口）
 
 ## 目录
 

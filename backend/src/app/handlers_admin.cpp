@@ -3,8 +3,6 @@
 
 #include <algorithm>
 #include <cstdlib>
-#include <fstream>
-#include <iterator>
 #include <regex>
 #include <set>
 
@@ -52,9 +50,10 @@ bool validRedirectUri(const std::string& uri) {
 }
 
 bool validScopes(const std::vector<std::string>& scopes) {
-    static const std::set<std::string> allowed = {
-        "openid", "profile", "profile:username", "profile:name",
-        "profile:avatar", "profile:student_id", "email", "roles"};
+    static const std::set<std::string> allowed = [] {
+        const auto names = scopes::whitelist();
+        return std::set<std::string>(names.begin(), names.end());
+    }();
     if (scopes.empty()) return false;
     for (const auto& scope : scopes) {
         if (allowed.find(scope) == allowed.end()) return false;
@@ -129,30 +128,21 @@ void appIntegrationSkill(const Request& req, Response& res) {
         http::error(res, 403, "forbidden", "只有应用管理员或开发者可以下载接入文档");
         return;
     }
-    std::vector<std::string> candidates;
-    if (const char* configured = std::getenv("UNISSO_INTEGRATION_SKILL")) {
-        if (configured[0]) candidates.emplace_back(configured);
-    }
-    candidates.push_back("../.claude/skills/unisso-integration/SKILL.md");
-    candidates.push_back(".claude/skills/unisso-integration/SKILL.md");
-    candidates.push_back("/home/cloud/deploy/unisso/.claude/skills/unisso-integration/SKILL.md");
-    candidates.push_back("/home/cloud/deploy/unisso-v2/.claude/skills/unisso-integration/SKILL.md");
-    for (const auto& path : candidates) {
-        std::ifstream input(path, std::ios::binary);
-        if (!input) continue;
-        std::string content((std::istreambuf_iterator<char>(input)),
-                            std::istreambuf_iterator<char>());
-        if (content.empty()) continue;
-        res.statusCode = 200;
-        res.headers["Content-Type"] = "text/markdown; charset=utf-8";
-        res.headers["Content-Disposition"] =
-            "attachment; filename=\"unisso-integration-SKILL.md\"";
-        res.headers["Cache-Control"] = "no-store";
-        res.body = content;
+    // kind=external serves the third-party (跳转授权) skill; anything else keeps
+    // the first-party (无感登录) skill, so existing callers are unaffected.
+    const bool external = util::trim(http::query(req, "kind")) == "external";
+    std::string skillFile, content;
+    if (!loadIntegrationSkillMarkdown(external ? "external" : "internal", skillFile,
+                                      content)) {
+        applog::error("[apps] integration skill file not found");
+        http::error(res, 404, "skill_not_found", "接入文档暂不可用，请联系平台管理员");
         return;
     }
-    applog::error("[apps] integration skill file not found");
-    http::error(res, 404, "skill_not_found", "接入文档暂不可用，请联系平台管理员");
+    res.statusCode = 200;
+    res.headers["Content-Type"] = "text/markdown; charset=utf-8";
+    res.headers["Content-Disposition"] = "attachment; filename=\"" + skillFile + "\"";
+    res.headers["Cache-Control"] = "no-store";
+    res.body = content;
 }
 
 void appsList(const Request& req, Response& res) {
