@@ -33,7 +33,6 @@
                 <div class="tag-row">
                   <span v-if="u.is_super_admin" class="badge badge-super">超级管理员</span>
                   <span v-else-if="u.is_admin" class="badge badge-admin">管理员</span>
-                  <span v-for="role in u.roles" :key="role.name" class="badge badge-secondary">{{ role.name }}</span>
                 </div>
               </td>
               <td>

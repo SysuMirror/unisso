@@ -27,7 +27,7 @@
       <div v-if="filteredApps.length" class="table-wrap">
         <table class="table">
           <thead>
-            <tr><th>应用</th><th>Client ID</th><th>类型</th><th>审核状态</th><th>状态</th><th>无感登录</th><th>Scopes</th><th>操作</th></tr>
+            <tr><th>应用</th><th>Client ID</th><th>状态</th><th>Scopes</th><th>操作</th></tr>
           </thead>
           <tbody>
             <tr v-for="app in filteredApps" :key="app.id">
@@ -43,25 +43,20 @@
               </td>
               <td><code class="code-inline">{{ app.client_id }}</code></td>
               <td>
-                <span class="badge" :class="app.kind === 'external' ? 'badge-secondary' : 'badge-primary'">
-                  {{ app.kind === 'external' ? '对外' : '内接' }}
-                </span>
-              </td>
-              <td>
-                <span class="badge" :class="reviewClass(app.status)">{{ reviewLabel(app.status) }}</span>
+                <div class="cell-badges">
+                  <span class="badge" :class="app.kind === 'external' ? 'badge-secondary' : 'badge-primary'">
+                    {{ app.kind === 'external' ? '对外' : '内接' }}
+                  </span>
+                  <span class="badge" :class="reviewClass(app.status)">{{ reviewLabel(app.status) }}</span>
+                  <span class="badge" :class="app.is_active ? 'badge-success' : 'badge-secondary'">
+                    {{ app.is_active ? '启用' : '禁用' }}
+                  </span>
+                  <span v-if="app.kind !== 'external'" class="badge"
+                        :class="app.m2m_enabled ? 'badge-success' : 'badge-secondary'">
+                    无感 {{ app.m2m_enabled ? '开' : '关' }}
+                  </span>
+                </div>
                 <div v-if="app.review_note" class="cell-sub">{{ app.review_note }}</div>
-              </td>
-              <td>
-                <span class="badge" :class="app.is_active ? 'badge-success' : 'badge-secondary'">
-                  {{ app.is_active ? '启用' : '禁用' }}
-                </span>
-              </td>
-              <td>
-                <span v-if="app.kind !== 'external'" class="badge"
-                      :class="app.m2m_enabled ? 'badge-success' : 'badge-secondary'">
-                  {{ app.m2m_enabled ? '开' : '关' }}
-                </span>
-                <span v-else class="text-muted">—</span>
               </td>
               <td>
                 <div class="tag-row">
@@ -416,6 +411,12 @@ onMounted(load)
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+.cell-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  max-width: 320px;
 }
 .filter-tabs {
   display: flex;
