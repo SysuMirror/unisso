@@ -9,7 +9,7 @@
       </div>
       <div class="page-actions">
         <RouterLink to="/docs" class="btn btn-ghost btn-sm">接入文档</RouterLink>
-        <button class="btn btn-primary btn-sm" type="button" @click="apply">申请接入</button>
+        <button class="btn btn-primary btn-sm" type="button" @click="apply">注册接入</button>
       </div>
     </div>
 
@@ -146,13 +146,13 @@
         <p>
           {{
             store.user
-              ? '在个人中心提交接入申请，管理员审核通过后会发放 client_id / client_secret。'
-              : '登录后即可在个人中心提交接入申请，管理员审核通过后发放接入凭据。'
+              ? '在个人中心自助注册接入应用，提交即生效并发放 client_id / client_secret（仅学院成员）。'
+              : '登录后即可在个人中心自助注册接入应用，提交即生效（仅学院成员）。'
           }}
         </p>
       </div>
       <button class="btn btn-primary" type="button" @click="apply">
-        {{ store.user ? '去申请接入' : '登录并申请' }}
+        {{ store.user ? '去注册接入' : '登录并注册' }}
       </button>
     </div>
   </div>

@@ -14,7 +14,7 @@
 | H2 | 信任首个 `X-Forwarded-For`，可伪造 IP 绕过限流 | 仅当 TCP peer 是 relay（`10.42.0.1`）或 loopback 时才读转发头，取**最右**一跳；其它 peer 直接用 TCP 地址 |
 | H3 | 账号关联密码/验证码可无限爆破 | 每对关联账号失败 5 次后锁定 15 分钟（Redis 计数） |
 | H4 | 集市邮箱与本地账号冲突时静默接管；`561` 硬编码超管 | 本地密码账号不再按邮箱自动合并；同一邮箱已绑其他 SSE id 时拒绝；超管 id 改为 `UNISSO_SSE_SUPER_ADMIN_IDS`（默认 `561`） |
-| H5 | 任意登录用户可注册 OAuth 客户端、任意回调/scope | 应用注册仅管理员；回调仅 HTTPS 或 localhost；scope 白名单；更新回调/scope 时撤销 consent 与 token |
+| H5 | 任意登录用户可注册 OAuth 客户端、任意回调/scope | 对外应用注册限**学院成员（`is_internal`）**自助、提交即生效（无需审核），但需登录 + CSRF；每人应用总数 ≤ 20；`client_secret` 仅返回一次（bcrypt 落库）；回调仅 HTTPS 或 localhost；scope 白名单；更新回调/scope 时撤销 consent 与 token；超级管理员可事后 `suspend` / 删除 |
 | M1 | 扫码 poll 可被构造链接造成登录 CSRF | `qr/start` 设置 HttpOnly state cookie，`poll` 必须同浏览器 cookie 匹配 |
 | M2 | 集市绑定 state 不与会话绑定、可重放 | 绑定回调要求当前会话 == state 中的用户；`setnx` 一次性 claim |
 | M4 | 集市回调错误参数反射进 HTML | 输出 HTML 转义 |
@@ -67,3 +67,7 @@
    独立审计存储；人脸审计建议保留 180 天。
 7. **设备信任**：`unisso_device` 是 180 天 HttpOnly cookie；清除 cookie/无痕窗口
    会重新触发二次验证；当前没有设备列表/远程撤销页面。
+8. **自助注册的 OAuth 客户端面**：学院成员可自助创建**立即可用**的对外 OAuth
+   客户端（本次有意开放，取消人工审核）。缓解：限 `is_internal`、每人 ≤ 20、
+   `client_secret` 仅返回一次、超管保留 `suspend`/删除、注册仍需登录 + CSRF；
+   但仍应把「新注册客户端」纳入审计/告警，必要时收紧为管理员审核。

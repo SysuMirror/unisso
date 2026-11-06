@@ -8,11 +8,12 @@
 
 namespace {
 
-// The admin console is single-account by design: only super admins manage
-// applications. Regular users keep their own self-service endpoints
-// (consents, sessions, org browsing, join requests).
-bool canManage(const User& user, const Application&) {
-    return user.isSuperAdmin;
+// A super admin manages every application; the creator (initiator, owner_id)
+// manages the ones they registered themselves. Registration is self-service
+// (no review), so the owner must be able to edit / rotate secret / delete.
+bool canManage(const User& user, const Application& app) {
+    if (user.isSuperAdmin) return true;
+    return !app.ownerId.empty() && app.ownerId == user.id;
 }
 
 bool canManageApps(const User& user) {
@@ -225,13 +226,15 @@ void appsCreate(const Request& req, Response& res) {
     http::ok(res, JsonValue(obj));
 }
 
-// Any logged-in 学院成员 may apply for a third-party (external) application;
-// it stays pending until the super admin approves it.
+// Self-service registration: any logged-in 学院成员 (is_internal) may register a
+// third-party (external) application. It takes effect immediately — no admin
+// review — and the caller receives the client credentials once. Super admins
+// still see every application (with its initiator) and can suspend/delete it.
 void appsApply(const Request& req, Response& res) {
     User user;
     if (!authx::requireUser(req, res, user)) return;
     if (!user.isInternal) {
-        http::error(res, 403, "internal_required", "只有学院成员可以申请接入");
+        http::error(res, 403, "internal_required", "只有学院成员可以注册接入应用");
         return;
     }
     std::string name = util::trim(http::input(req, "name"));
@@ -251,13 +254,14 @@ void appsApply(const Request& req, Response& res) {
         http::error(res, 400, "invalid_scope", "包含不支持的权限范围");
         return;
     }
-    long long pendingCount = 0;
+    // Abuse guard, replacing the old pending-application cap: bound how many
+    // applications a single account may own.
+    long long ownedCount = 0;
     auto rows = Db::query(
-        "SELECT COUNT(*) AS c FROM applications WHERE owner_id=" + Db::quote(user.id) +
-        " AND status='pending'");
-    try { pendingCount = std::stoll(rows.front().at("c")); } catch (...) {}
-    if (pendingCount >= 5) {
-        http::error(res, 429, "too_many_pending", "待审核申请过多，请等待审核结果");
+        "SELECT COUNT(*) AS c FROM applications WHERE owner_id=" + Db::quote(user.id));
+    try { ownedCount = std::stoll(rows.front().at("c")); } catch (...) {}
+    if (ownedCount >= 20) {
+        http::error(res, 429, "too_many_applications", "你注册的应用过多，请联系管理员");
         return;
     }
 
@@ -270,19 +274,29 @@ void appsApply(const Request& req, Response& res) {
     app.redirectUris = redirectUris;
     app.allowedScopes = allowedScopes;
     app.homepageUrl = util::trim(http::input(req, "homepage_url"));
-    app.isActive = false;
+    app.isActive = true;
     app.isConfidential = true;
     app.kind = "external";
-    app.status = "pending";
+    app.status = "approved";
     app.ownerId = user.id;
     app.createdAt = util::nowIso();
 
-    if (!insertApplication(app, "")) {
-        http::error(res, 500, "apply_failed", "申请提交失败");
+    std::string rawSecret = newClientSecret();
+    std::string secretHash;
+    try { secretHash = password::hash(rawSecret); }
+    catch (const std::exception&) {
+        http::error(res, 500, "apply_failed", "无法生成客户端密钥");
+        return;
+    }
+
+    if (!insertApplication(app, secretHash)) {
+        http::error(res, 500, "apply_failed", "应用注册失败");
         return;
     }
     std::map<std::string, JsonValue> obj;
     obj["application"] = repo::applicationJson(app, false);
+    obj["client_id"] = JsonValue(app.clientId);
+    obj["client_secret"] = JsonValue(rawSecret);
     http::ok(res, JsonValue(obj));
 }
 

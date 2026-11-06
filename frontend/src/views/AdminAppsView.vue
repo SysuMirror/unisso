@@ -3,7 +3,7 @@
     <div class="page-head">
       <div>
         <h1 class="page-title">应用管理</h1>
-        <p class="page-sub">内接平台与对外授权应用，含接入审核。</p>
+        <p class="page-sub">内接平台与对外授权应用；对外应用注册即生效，可事后暂停 / 删除。</p>
       </div>
       <div class="page-head-actions">
         <a class="btn btn-secondary" href="/api/apps/integration-skill" download>
@@ -19,6 +19,8 @@
     <div class="filter-tabs">
       <button class="filter-tab" :class="{ 'is-active': filter === 'all' }" type="button"
               @click="filter = 'all'">全部 ({{ apps.length }})</button>
+      <button class="filter-tab" :class="{ 'is-active': filter === 'external' }" type="button"
+              @click="filter = 'external'">对外 ({{ externalCount }})</button>
       <button class="filter-tab" :class="{ 'is-active': filter === 'pending' }" type="button"
               @click="filter = 'pending'">待审核 ({{ pendingCount }})</button>
     </div>
@@ -30,7 +32,7 @@
       <div v-if="filteredApps.length" class="table-wrap">
         <table class="table">
           <thead>
-            <tr><th>应用</th><th>Client ID</th><th>状态</th><th>Scopes</th><th>操作</th></tr>
+            <tr><th>应用</th><th>发起人</th><th>Client ID</th><th>状态</th><th>Scopes</th><th>操作</th></tr>
           </thead>
           <tbody>
             <tr v-for="app in filteredApps" :key="app.id">
@@ -43,6 +45,10 @@
                     <div v-if="app.description" class="cell-sub">{{ app.description }}</div>
                   </div>
                 </div>
+              </td>
+              <td>
+                <div class="cell-main">{{ app.owner_name || app.owner_email || '—' }}</div>
+                <div v-if="app.owner_name && app.owner_email" class="cell-sub">{{ app.owner_email }}</div>
               </td>
               <td><code class="code-inline">{{ app.client_id }}</code></td>
               <td>
@@ -87,8 +93,8 @@
         </table>
       </div>
       <div v-else class="empty-state">
-        <h3>{{ filter === 'pending' ? '没有待审核的申请' : '还没有接入应用' }}</h3>
-        <p>{{ filter === 'pending' ? '' : '用「注册内接应用」添加自有平台。' }}</p>
+        <h3>{{ filter === 'pending' ? '没有待审核的申请' : filter === 'external' ? '还没有对外应用' : '还没有接入应用' }}</h3>
+        <p>{{ filter === 'pending' ? '' : '内接用「注册内接应用」添加；对外由学院成员自助注册。' }}</p>
       </div>
     </div>
 
@@ -155,6 +161,11 @@
         <div class="form-group">
           <label class="form-label">Client ID</label>
           <input :value="detail.client_id" class="form-input" readonly />
+        </div>
+        <div class="form-group">
+          <label class="form-label">发起人</label>
+          <input :value="detail.owner_name || detail.owner_email || detail.owner_id || '—'"
+                 class="form-input" readonly />
         </div>
         <div class="form-group">
           <label class="form-label">回调地址</label>
@@ -231,9 +242,12 @@ const apps = ref([])
 const filter = ref('all')
 const canManageApps = computed(() => !!store.user?.is_super_admin)
 const pendingCount = computed(() => apps.value.filter((app) => app.status === 'pending').length)
-const filteredApps = computed(() => filter.value === 'pending'
-  ? apps.value.filter((app) => app.status === 'pending')
-  : apps.value)
+const externalCount = computed(() => apps.value.filter((app) => app.kind === 'external').length)
+const filteredApps = computed(() => {
+  if (filter.value === 'pending') return apps.value.filter((app) => app.status === 'pending')
+  if (filter.value === 'external') return apps.value.filter((app) => app.kind === 'external')
+  return apps.value
+})
 
 const loading = ref(true)
 const error = ref('')
@@ -258,7 +272,7 @@ const form = reactive({
 })
 
 function reviewLabel(status) {
-  const labels = { approved: '已通过', pending: '待审核', rejected: '已驳回', suspended: '已暂停' }
+  const labels = { approved: '已生效', pending: '待审核', rejected: '已驳回', suspended: '已暂停' }
   return labels[status] || status || '—'
 }
 function reviewClass(status) {

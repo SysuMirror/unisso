@@ -85,26 +85,29 @@
           <section class="psec">
             <div class="section-head">
               <div>
-                <h2 class="section-title">我的接入申请</h2>
-                <p class="section-sub">学院成员可申请对外授权应用，由管理员审核。</p>
+                <h2 class="section-title">我的接入应用</h2>
+                <p class="section-sub">学院成员可自助注册对外授权应用，提交即生效（无需审核）。</p>
               </div>
-              <button class="btn btn-primary btn-sm" type="button" @click="openApply">申请接入</button>
+              <button class="btn btn-primary btn-sm" type="button" @click="openApply">注册接入应用</button>
             </div>
             <div v-if="myApps.length" class="pstack">
               <div v-for="app in myApps" :key="app.id" class="prow">
                 <div class="prow-main">
                   <div class="prow-title">{{ app.name }}</div>
                   <div v-if="app.description" class="prow-desc">{{ app.description }}</div>
+                  <div class="prow-sub"><code class="code-inline">{{ app.client_id }}</code></div>
                 </div>
                 <div class="prow-side prow-side-badges">
                   <span class="badge" :class="app.kind === 'external' ? 'badge-secondary' : 'badge-primary'">
                     {{ app.kind === 'external' ? '对外' : '内接' }}
                   </span>
                   <span class="badge" :class="statusClass(app.status)">{{ statusLabel(app.status) }}</span>
+                  <button class="btn btn-secondary btn-sm" type="button" @click="resetSecret(app)">重置 Secret</button>
+                  <button class="btn btn-danger btn-sm" type="button" @click="removeApp(app)">删除</button>
                 </div>
               </div>
             </div>
-            <div v-else class="compact-empty">还没有提交过接入申请。</div>
+            <div v-else class="compact-empty">还没有注册过接入应用。</div>
           </section>
         </div>
 
@@ -144,7 +147,7 @@
     </Modal>
 
     <Modal :open="applyOpen" @close="applyOpen = false">
-      <template #title>申请接入（对外授权应用）</template>
+      <template #title>注册接入应用（对外授权）</template>
       <div v-if="applyError" class="alert alert-danger">{{ applyError }}</div>
       <form @submit.prevent="submitApply">
         <div class="form-group">
@@ -174,14 +177,30 @@
             </label>
           </div>
         </div>
-        <p class="modal-hint">仅学院成员可申请；提交后由管理员审核，审核通过才会发放接入凭据。</p>
+        <p class="modal-hint">仅学院成员可注册；提交后立即生效，并发放接入凭据（client_id / client_secret，只显示一次）。</p>
         <div class="modal-actions">
           <button class="btn btn-ghost" type="button" @click="applyOpen = false">取消</button>
           <button class="btn btn-primary" type="submit" :disabled="applySubmitting">
-            {{ applySubmitting ? '提交中…' : '提交申请' }}
+            {{ applySubmitting ? '注册中…' : '注册' }}
           </button>
         </div>
       </form>
+    </Modal>
+
+    <Modal :open="secretOpen" @close="secretOpen = false">
+      <template #title>{{ secretInfo.title }}</template>
+      <p class="page-sub">请立即保存以下凭证。Client Secret 只会显示这一次。</p>
+      <div class="form-group">
+        <label class="form-label">Client ID</label>
+        <div class="secret-box">{{ secretInfo.clientId }}</div>
+      </div>
+      <div v-if="secretInfo.clientSecret" class="form-group">
+        <label class="form-label">Client Secret</label>
+        <div class="secret-box">{{ secretInfo.clientSecret }}</div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-primary" type="button" @click="secretOpen = false">我已保存</button>
+      </div>
     </Modal>
   </div>
 </template>
@@ -221,6 +240,8 @@ const myApps = ref([])
 const applyOpen = ref(false)
 const applySubmitting = ref(false)
 const applyError = ref('')
+const secretOpen = ref(false)
+const secretInfo = reactive({ title: '', clientId: '', clientSecret: '' })
 const applyForm = reactive({
   name: '',
   description: '',
@@ -230,7 +251,7 @@ const applyForm = reactive({
 })
 
 function statusLabel(status) {
-  const labels = { approved: '已通过', pending: '待审核', rejected: '已驳回', suspended: '已暂停' }
+  const labels = { approved: '已生效', pending: '待审核', rejected: '已驳回', suspended: '已暂停' }
   return labels[status] || status || '—'
 }
 function statusClass(status) {
@@ -295,7 +316,7 @@ async function submitApply() {
   applySubmitting.value = true
   try {
     const redirects = applyForm.redirectUris.split('\n').map((line) => line.trim()).filter(Boolean)
-    await api('/api/apps/apply', {
+    const data = await api('/api/apps/apply', {
       method: 'POST',
       body: {
         name: applyForm.name,
@@ -306,12 +327,42 @@ async function submitApply() {
       }
     })
     applyOpen.value = false
-    notice.value = '申请已提交，等待管理员审核。'
+    secretInfo.title = '应用已注册（立即生效）'
+    secretInfo.clientId = data?.client_id || ''
+    secretInfo.clientSecret = data?.client_secret || ''
+    secretOpen.value = true
+    notice.value = '应用已注册并生效，请保存好接入凭据。'
     await loadPermissions()
   } catch (e) {
     applyError.value = e.message
   } finally {
     applySubmitting.value = false
+  }
+}
+
+async function resetSecret(app) {
+  if (!confirm(`重置「${app.name}」的 Client Secret？旧 secret 将立即失效。`)) return
+  error.value = ''
+  try {
+    const data = await api('/api/apps/' + app.id + '/reset-secret', { method: 'POST' })
+    secretInfo.title = 'Secret 已重置'
+    secretInfo.clientId = app.client_id || ''
+    secretInfo.clientSecret = data?.client_secret || ''
+    secretOpen.value = true
+  } catch (e) {
+    error.value = e.message
+  }
+}
+
+async function removeApp(app) {
+  if (!confirm(`删除应用「${app.name}」？此操作不可撤销。`)) return
+  error.value = ''
+  try {
+    await api('/api/apps/' + app.id, { method: 'DELETE' })
+    notice.value = '应用已删除。'
+    await loadPermissions()
+  } catch (e) {
+    error.value = e.message
   }
 }
 

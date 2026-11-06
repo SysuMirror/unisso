@@ -372,6 +372,16 @@ JsonValue applicationJson(const Application& app, bool withSecret) {
     obj["status"] = JsonValue(app.status);
     obj["review_note"] = JsonValue(app.reviewNote);
     obj["owner_id"] = JsonValue(app.ownerId);
+    // Resolve the initiator (creator) so the admin console can show who an
+    // application came from without a second round-trip.
+    if (!app.ownerId.empty()) {
+        auto owner = findUserById(app.ownerId);
+        if (owner) {
+            obj["owner_email"] = JsonValue(owner->email);
+            obj["owner_name"] =
+                JsonValue(owner->fullName.empty() ? owner->username : owner->fullName);
+        }
+    }
     obj["created_at"] = JsonValue(app.createdAt);
     return JsonValue(obj);
 }
