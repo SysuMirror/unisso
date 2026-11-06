@@ -13,6 +13,8 @@
       </div>
     </div>
 
+    <SkillPrompt />
+
     <div v-if="loading" class="panel panel-pad muted-text">正在加载文档…</div>
 
     <div v-else-if="error" class="panel panel-pad">
@@ -37,6 +39,7 @@
 // ships no markdown dependency. Input is HTML-escaped before any tags are
 // emitted, so the published document cannot inject markup.
 import { onMounted, ref } from 'vue'
+import SkillPrompt from '../components/SkillPrompt.vue'
 
 const skillUrl = '/api/public/docs/skill?kind=external'
 const discoveryUrl = '/.well-known/openid-configuration'

@@ -13,6 +13,8 @@
       </div>
     </div>
 
+    <SkillPrompt />
+
     <div class="feature-grid">
       <div class="feature">
         <span class="feature-num">01</span>
@@ -163,6 +165,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '../api'
 import { store } from '../store'
+import SkillPrompt from '../components/SkillPrompt.vue'
 
 const router = useRouter()
 const discoveryUrl = '/.well-known/openid-configuration'

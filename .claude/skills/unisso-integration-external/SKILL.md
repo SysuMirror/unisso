@@ -1,6 +1,6 @@
 ---
 name: unisso-integration-external
-description: 把外部平台（第三方应用）接入 UniSSO 跳转授权（OAuth2 授权码 + PKCE S256 + 同意页）。覆盖申请审核、授权、换 token、userinfo、错误契约、部署守则与验收清单。
+description: 把外部平台（第三方应用）接入 UniSSO 跳转授权（OAuth2 授权码 + PKCE S256 + 同意页）。覆盖自助注册、授权、换 token、userinfo、错误契约、部署守则与验收清单。
 ---
 
 # UniSSO 外部平台跳转授权接入
@@ -12,7 +12,7 @@ UniSSO 只负责身份（sub/sse_sub/internal/name/email/picture/roles）；权�
 
 ## 前置
 
-1. 外部平台走**申请**流程（https://sso.ssemarket.cn/admin/apps 提交后 `status=pending`，超管审核 approve 后才可用）。内接应用的创建入口只用于内部平台。
+1. **学院成员**（`is_internal=1`）在 https://sso.ssemarket.cn/developer 点「注册接入」自助创建对外应用，**提交即生效**（无审核，直接 `status=approved`）。内接应用的创建入口只用于内部平台；超级管理员可事后在 `/admin/apps` 暂停或删除。
 2. 拿到 `client_id` 与 `client_secret`（secret 只在生成时显示一次）。
 3. 登记 **`redirect_uris`**：逐字符精确匹配，含 scheme/host/port/path；未登记的回调地址会被直接拒绝（`invalid_redirect_uri`）。
 4. 登记 **`allowed_scopes`**（白名单：`openid, profile, profile:username, profile:name, profile:avatar, profile:student_id, email, roles`）。
