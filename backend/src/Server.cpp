@@ -281,7 +281,17 @@ void Server::run() {
         Response res;
         dispatch(req, res);
         hres.status = res.statusCode;
-        for (const auto& [key, value] : res.headers) hres.set_header(key, value);
+        for (const auto& [key, value] : res.headers) {
+            // 分帧头(Content-Length/Transfer-Encoding)归传输层所有:cpp-httplib
+            // 会按 body 自行计算 Content-Length。若把应用里显式设置的同名头
+            // 再转发一次,响应里就会出现两个 Content-Length,严格的 nginx 会
+            // 以 502 拒收。这里过滤掉,只保留一份。
+            std::string lowerKey = key;
+            std::transform(lowerKey.begin(), lowerKey.end(), lowerKey.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            if (lowerKey == "content-length" || lowerKey == "transfer-encoding") continue;
+            hres.set_header(key, value);
+        }
         for (const auto& [key, value] : res.extraHeaders) hres.headers.emplace(key, value);
         hres.body = res.body;
     };

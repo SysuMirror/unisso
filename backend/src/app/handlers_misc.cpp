@@ -47,7 +47,6 @@ bool serveFile(Response& res, const std::string& filePath, bool immutable) {
     if (!util::readFile(filePath, data)) return false;
     res.statusCode = 200;
     res.headers["Content-Type"] = util::mimeType(filePath);
-    res.headers["Content-Length"] = std::to_string(data.size());
     res.headers["Cache-Control"] = immutable
         ? "public, max-age=31536000, immutable"
         : "no-cache";
