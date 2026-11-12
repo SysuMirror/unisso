@@ -130,6 +130,7 @@ const scopeSummary = computed(() => {
   if (profile.length) parts.push(`基本资料（${profile.join('、')}）`)
   if (names.has('email')) parts.push('邮箱地址')
   if (names.has('roles')) parts.push('角色信息')
+  if (names.has('sse_identity')) parts.push('集市跨服务身份标识（可被用于跨服务关联同一账号）')
   return parts.length ? parts : ['基础账号信息']
 })
 

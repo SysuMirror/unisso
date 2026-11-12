@@ -690,7 +690,10 @@ bool issue(const User& user, const Application& app,
     obj["refresh_token"] = JsonValue(refreshToken);
     obj["scope"] = JsonValue(scope);
     obj["sso_sub"] = JsonValue(user.id);
-    if (!user.sseUserId.empty()) obj["sse_sub"] = JsonValue(user.sseUserId);
+    // sse_sub 仅在授予 sse_identity 时出现在令牌响应里（与 userinfo 一致）。
+    if (std::find(grantedScopes.begin(), grantedScopes.end(), "sse_identity") != grantedScopes.end() &&
+        !user.sseUserId.empty())
+        obj["sse_sub"] = JsonValue(user.sseUserId);
     if (includeIdToken && std::find(grantedScopes.begin(), grantedScopes.end(), "openid") != grantedScopes.end()) {
         auto claims = scopes::userClaims(user, grantedScopes).asObject();
         if (!nonce.empty()) claims["nonce"] = JsonValue(nonce);

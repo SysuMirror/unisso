@@ -12,10 +12,10 @@ UniSSO 只负责身份（sub/sse_sub/internal/name/email/picture/roles）；权�
 
 ## 前置
 
-1. **学院成员**（`is_internal=1`）在 https://sso.ssemarket.cn/developer 点「注册接入」自助创建对外应用，**提交即生效**（无审核，直接 `status=approved`）。内接应用的创建入口只用于内部平台；超级管理员可事后在 `/admin/apps` 暂停或删除。
+1. **任何已登录账号**（不限于学院成员）都可在 https://sso.ssemarket.cn/developer 点「注册接入」自助创建对外应用，**提交即生效**（无审核，直接 `status=approved`，每账号至多 20 个应用）。内接应用的创建入口只用于内部平台；超级管理员可事后在 `/admin/apps` 暂停或删除。
 2. 拿到 `client_id` 与 `client_secret`（secret 只在生成时显示一次）。
-3. 登记 **`redirect_uris`**：逐字符精确匹配，含 scheme/host/port/path；未登记的回调地址会被直接拒绝（`invalid_redirect_uri`）。
-4. 登记 **`allowed_scopes`**（白名单：`openid, profile, profile:username, profile:name, profile:avatar, profile:student_id, email, roles`）。
+3. 登记 **`redirect_uris`**：逐字符精确匹配，含 scheme/host/port/path；必须是 `https://`（或 `http://localhost` 用于本地开发）；未登记的回调地址会被直接拒绝（`invalid_redirect_uri`）。
+4. 登记 **`allowed_scopes`**（白名单：`openid, profile, profile:username, profile:name, profile:avatar, profile:student_id, email, roles, sse_identity`）。**需要 `sse_sub` 的应用必须显式申请 `sse_identity`**（见下文凭证说明）。
 5. **凭据唯一可信来源是运行实例的 env**；仓库里的 env/compose 值视为可能过期——重建容器/进程前先从运行实例取（docker inspect / /proc/PID/environ）。
 6. `client_secret` **只在后端持有**，绝不能下发到浏览器/前端。
 
@@ -65,7 +65,7 @@ grant_type=authorization_code
 ```json
 {"access_token":"...","token_type":"Bearer","expires_in":3600,
  "refresh_token":"...","scope":"openid profile:name email",
- "sso_sub":"...","sse_sub":"...","id_token":"..."}
+ "sso_sub":"...","id_token":"..."}
 ```
 
 - **`code` 是一次性的**：重复使用 → `invalid_grant`。
@@ -78,7 +78,9 @@ GET https://sso.ssemarket.cn/api/oauth/userinfo
 Authorization: Bearer <access_token>
 ```
 
-claims（按已授权的 scope 裁剪）：`sub`/`sso_sub`、`sse_sub`（已绑定校本身份时）、`preferred_username`、`name`、`picture`、`student_id`、`email`+`email_verified`、`roles`、`internal`。
+claims（按已授权的 scope 裁剪）：`sub`/`sso_sub`、`preferred_username`、`name`、`picture`、`student_id`、`email`+`email_verified`、`roles`、`internal`。
+
+- **`sse_sub`（集市身份标识）现改为按 scope 返回**：只有应用被授予 `sse_identity` scope 时，userinfo 与 token 响应里才会出现 `sse_sub`；未申请该 scope 的应用**拿不到**此字段（这是相对旧契约的**破坏性变更**，依赖 `sse_sub` 的 RP 须补申请 `sse_identity`）。`sub`/`sso_sub` 是任何应用都会拿到的不透明账号 ID。
 
 - `profile` 是 legacy 别名，会展开为 `profile:username/profile:name/profile:avatar/profile:student_id`；建议**显式申请**子 scope，同意页更精确。
 - `groups` / `organizations` 已移除，不要依赖。

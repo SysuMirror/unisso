@@ -148,8 +148,8 @@
         <p>
           {{
             store.user
-              ? '在个人中心自助注册接入应用，提交即生效并发放 client_id / client_secret（仅学院成员）。'
-              : '登录后即可在个人中心自助注册接入应用，提交即生效（仅学院成员）。'
+              ? '在个人中心自助注册接入应用，提交即生效并发放 client_id / client_secret（每个账号至多 20 个应用）。'
+              : '登录后即可在个人中心自助注册接入应用，提交即生效（每个账号至多 20 个应用）。'
           }}
         </p>
       </div>
@@ -198,7 +198,9 @@ const FALLBACK_SCOPES = [
   { name: 'profile:name', description: '真实姓名' },
   { name: 'profile:avatar', description: '头像' },
   { name: 'profile:student_id', description: '学号' },
-  { name: 'email', description: '邮箱地址' }
+  { name: 'email', description: '邮箱地址' },
+  { name: 'roles', description: '用户角色列表' },
+  { name: 'sse_identity', description: '集市身份标识（sse_sub，可跨服务关联同一人）' }
 ]
 
 const issuer = computed(() => meta.value?.issuer || 'https://sso.ssemarket.cn')

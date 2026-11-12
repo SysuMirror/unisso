@@ -86,7 +86,7 @@
             <div class="section-head">
               <div>
                 <h2 class="section-title">我的接入应用</h2>
-                <p class="section-sub">学院成员可自助注册对外授权应用，提交即生效（无需审核）。</p>
+                <p class="section-sub">登录后即可自助注册对外授权应用，提交即生效（无需审核；每个账号至多 20 个）。</p>
               </div>
               <button class="btn btn-primary btn-sm" type="button" @click="openApply">注册接入应用</button>
             </div>
@@ -177,7 +177,7 @@
             </label>
           </div>
         </div>
-        <p class="modal-hint">仅学院成员可注册；提交后立即生效，并发放接入凭据（client_id / client_secret，只显示一次）。</p>
+        <p class="modal-hint">提交后立即生效，并发放接入凭据（client_id / client_secret，只显示一次）；每个账号至多 20 个应用。</p>
         <div class="modal-actions">
           <button class="btn btn-ghost" type="button" @click="applyOpen = false">取消</button>
           <button class="btn btn-primary" type="submit" :disabled="applySubmitting">
@@ -232,7 +232,9 @@ const scopeCatalog = [
   { name: 'profile:name', description: '真实姓名' },
   { name: 'profile:avatar', description: '头像' },
   { name: 'profile:student_id', description: '学号' },
-  { name: 'email', description: '邮箱地址' }
+  { name: 'email', description: '邮箱地址' },
+  { name: 'roles', description: '用户角色列表' },
+  { name: 'sse_identity', description: '集市身份标识（sse_sub，可跨服务关联同一人）' }
 ]
 
 const consents = ref([])

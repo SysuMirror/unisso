@@ -94,7 +94,7 @@
       </div>
       <div v-else class="empty-state">
         <h3>{{ filter === 'pending' ? '没有待审核的申请' : filter === 'external' ? '还没有对外应用' : '还没有接入应用' }}</h3>
-        <p>{{ filter === 'pending' ? '' : '内接用「注册内接应用」添加；对外由学院成员自助注册。' }}</p>
+        <p>{{ filter === 'pending' ? '' : '内接用「注册内接应用」添加；对外由登录用户自助注册。' }}</p>
       </div>
     </div>
 
@@ -235,7 +235,8 @@ const scopeCatalog = [
   { name: 'profile:avatar', description: '头像' },
   { name: 'profile:student_id', description: '学号' },
   { name: 'email', description: '邮箱地址' },
-  { name: 'roles', description: '用户角色列表' }
+  { name: 'roles', description: '用户角色列表' },
+  { name: 'sse_identity', description: '集市身份标识（sse_sub，可跨服务关联同一人）' }
 ]
 
 const apps = ref([])

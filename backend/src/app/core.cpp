@@ -844,7 +844,8 @@ std::vector<std::string> effective(const std::vector<std::string>& requested,
 
 std::vector<std::string> whitelist() {
     return {"openid", "profile", "profile:username", "profile:name",
-            "profile:avatar", "profile:student_id", "email", "roles"};
+            "profile:avatar", "profile:student_id", "email", "roles",
+            "sse_identity"};
 }
 
 std::string description(const std::string& name) {
@@ -856,6 +857,7 @@ std::string description(const std::string& name) {
         {"profile:student_id", "学号"},
         {"email", "邮箱地址"},
         {"roles", "用户角色列表"},
+        {"sse_identity", "集市身份标识（sse_sub，可跨服务关联同一人）"},
     };
     auto it = defs.find(name);
     return it == defs.end() ? name : it->second;
@@ -864,7 +866,8 @@ std::string description(const std::string& name) {
 JsonValue catalog() {
     std::vector<JsonValue> items;
     for (const auto& name : {"openid", "profile:username", "profile:name",
-                             "profile:avatar", "profile:student_id", "email", "roles"}) {
+                             "profile:avatar", "profile:student_id", "email", "roles",
+                             "sse_identity"}) {
         std::map<std::string, JsonValue> item;
         item["name"] = JsonValue(std::string(name));
         item["description"] = JsonValue(description(name));
@@ -877,10 +880,13 @@ JsonValue userClaims(const User& user, const std::vector<std::string>& granted) 
     std::map<std::string, JsonValue> claims;
     claims["sub"] = JsonValue(user.id);
     claims["sso_sub"] = JsonValue(user.id);
-    if (!user.sseUserId.empty()) claims["sse_sub"] = JsonValue(user.sseUserId);
     auto has = [&granted](const std::string& scope) {
         return std::find(granted.begin(), granted.end(), scope) != granted.end();
     };
+    // 集市身份标识（sse_sub）是稳定的跨服务关联符：仅当应用被授予
+    // sse_identity 时才返回，避免默认把每个 RP 都能关联到集市账号。
+    if (has("sse_identity") && !user.sseUserId.empty())
+        claims["sse_sub"] = JsonValue(user.sseUserId);
     if (has("profile:username") && !user.username.empty())
         claims["preferred_username"] = JsonValue(user.username);
     if (has("profile:name") && !user.fullName.empty())

@@ -33,7 +33,7 @@ let copyTimer = null
 
 const prompt = `请阅读并严格遵循 ${typeof window !== 'undefined' ? window.location.origin : ''}${skillUrl} 的 UniSSO 接入规范，帮我把当前项目接入 UniSSO 单点登录（OAuth2 授权码 + PKCE S256）：
 1. 先通读该规范（端点、PKCE、错误契约、验收清单）；
-2. 在 https://sso.ssemarket.cn/developer 点「注册接入」自助创建对外应用（学院成员提交即生效），登记回调地址，拿到 client_id / client_secret（secret 只显示一次）；
+2. 在 https://sso.ssemarket.cn/developer 点「注册接入」自助创建对外应用（登录后提交即生效），登记回调地址，拿到 client_id / client_secret（secret 只显示一次）；
 3. 按规范实现：跳转 /authorize → 回调校验 state → 后端用 code 换 token → 调 /api/oauth/userinfo 建立本地会话；client_secret 只留在后端，回调地址逐字符与登记值一致；
 4. 自测「授权 → 回调 → 换 token → 取用户信息」全链路通过后交付。`
 

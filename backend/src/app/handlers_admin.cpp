@@ -226,17 +226,16 @@ void appsCreate(const Request& req, Response& res) {
     http::ok(res, JsonValue(obj));
 }
 
-// Self-service registration: any logged-in 学院成员 (is_internal) may register a
-// third-party (external) application. It takes effect immediately — no admin
-// review — and the caller receives the client credentials once. Super admins
-// still see every application (with its initiator) and can suspend/delete it.
+// Self-service registration: ANY logged-in account may register a third-party
+// (external) application — internal members and outside developers alike. It
+// takes effect immediately (no admin review) and the caller receives the client
+// credentials once. Abuse is bounded by the per-account cap below plus the
+// hard constraints on every app (https/localhost redirect_uris only, scopes
+// limited to the whitelist, a consent screen on every authorization). Super
+// admins see every application (with its initiator) and can suspend/delete it.
 void appsApply(const Request& req, Response& res) {
     User user;
     if (!authx::requireUser(req, res, user)) return;
-    if (!user.isInternal) {
-        http::error(res, 403, "internal_required", "只有学院成员可以注册接入应用");
-        return;
-    }
     std::string name = util::trim(http::input(req, "name"));
     if (name.empty()) {
         http::error(res, 400, "invalid_input", "应用名称不能为空");
@@ -293,6 +292,9 @@ void appsApply(const Request& req, Response& res) {
         http::error(res, 500, "apply_failed", "应用注册失败");
         return;
     }
+    applog::access("[apps] self-registered external app client_id=" + app.clientId +
+                   " owner=" + user.id + " internal=" + (user.isInternal ? "1" : "0") +
+                   " name=" + name);
     std::map<std::string, JsonValue> obj;
     obj["application"] = repo::applicationJson(app, false);
     obj["client_id"] = JsonValue(app.clientId);
