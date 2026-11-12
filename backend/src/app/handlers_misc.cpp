@@ -64,7 +64,7 @@ size_t discardResponse(char*, size_t size, size_t nmemb, void*) {
 // q-values are deliberately ignored (a plain "asks for markdown" is the signal
 // we act on, otherwise we serve the SPA as usual).
 bool wantsMarkdown(const Request& req) {
-    std::string accept = req.get_header_value("Accept");
+    std::string accept = http::header(req, "Accept");
     for (char& c : accept) {
         c = static_cast<char>(::tolower(static_cast<unsigned char>(c)));
     }
