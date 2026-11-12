@@ -74,7 +74,30 @@ bool normalizeRedirectUris(std::vector<std::string>& uris) {
     return true;
 }
 
-bool imageExtension(const std::string& contentType, const std::string& data, std::string& ext) {
+std::string stringArraySql(const std::vector<std::string>& values) {
+    return Db::quote(JsonValue(values).toJson());
+}
+
+bool insertApplication(const Application& app, const std::string& secretHash) {
+    std::string sql =
+        "INSERT INTO applications (id,client_id,client_secret,name,description,icon,"
+        "redirect_uris,allowed_scopes,homepage_url,is_active,is_confidential,"
+        "kind,status,owner_id,created_at,updated_at) VALUES (" +
+        Db::quote(app.id) + "," + Db::quote(app.clientId) + "," + Db::quote(secretHash) + "," +
+        Db::quote(app.name) + "," + Db::nullable(app.description) + "," +
+        Db::nullable(app.icon) + "," +
+        stringArraySql(app.redirectUris) + "," + stringArraySql(app.allowedScopes) + "," +
+        Db::nullable(app.homepageUrl) + "," + (app.isActive ? "1" : "0") + "," +
+        (app.isConfidential ? "1" : "0") + "," + Db::quote(app.kind) + "," +
+        Db::quote(app.status) + "," + Db::quote(app.ownerId) + ",NOW(),NOW())";
+    return Db::exec(sql) >= 0;
+}
+
+}  // namespace
+
+namespace images {
+
+bool extension(const std::string& contentType, const std::string& data, std::string& ext) {
     if (contentType == "image/jpeg" && data.size() > 3 &&
         static_cast<unsigned char>(data[0]) == 0xff &&
         static_cast<unsigned char>(data[1]) == 0xd8) {
@@ -99,26 +122,7 @@ bool imageExtension(const std::string& contentType, const std::string& data, std
     return false;
 }
 
-std::string stringArraySql(const std::vector<std::string>& values) {
-    return Db::quote(JsonValue(values).toJson());
-}
-
-bool insertApplication(const Application& app, const std::string& secretHash) {
-    std::string sql =
-        "INSERT INTO applications (id,client_id,client_secret,name,description,icon,"
-        "redirect_uris,allowed_scopes,homepage_url,is_active,is_confidential,"
-        "kind,status,owner_id,created_at,updated_at) VALUES (" +
-        Db::quote(app.id) + "," + Db::quote(app.clientId) + "," + Db::quote(secretHash) + "," +
-        Db::quote(app.name) + "," + Db::nullable(app.description) + "," +
-        Db::nullable(app.icon) + "," +
-        stringArraySql(app.redirectUris) + "," + stringArraySql(app.allowedScopes) + "," +
-        Db::nullable(app.homepageUrl) + "," + (app.isActive ? "1" : "0") + "," +
-        (app.isConfidential ? "1" : "0") + "," + Db::quote(app.kind) + "," +
-        Db::quote(app.status) + "," + Db::quote(app.ownerId) + ",NOW(),NOW())";
-    return Db::exec(sql) >= 0;
-}
-
-}  // namespace
+}  // namespace images
 
 namespace handlers {
 
@@ -477,7 +481,7 @@ void appsIcon(const Request& req, Response& res) {
         return;
     }
     std::string ext;
-    if (!imageExtension(file->contentType, file->data, ext)) {
+    if (!images::extension(file->contentType, file->data, ext)) {
         http::error(res, 400, "invalid_file", "只支持 JPEG、PNG、GIF、WebP 图片");
         return;
     }

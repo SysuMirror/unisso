@@ -152,6 +152,16 @@ JsonValue stringArray(const std::vector<std::string>& values);
 }  // namespace jsonx
 
 // ===========================================================================
+// Images
+// ===========================================================================
+
+namespace images {
+// Sniffs a supported image format (jpeg/png/gif/webp) from the declared
+// content type plus the magic bytes; on success sets ext (e.g. ".png").
+bool extension(const std::string& contentType, const std::string& data, std::string& ext);
+}  // namespace images
+
+// ===========================================================================
 // Database / cache
 // ===========================================================================
 
@@ -464,6 +474,14 @@ bool loadIntegrationSkillMarkdown(const std::string& kind, std::string& fileName
 // Public developer portal (no auth, read-only, no user data).
 void publicDocsMeta(const Request& req, Response& res);
 void publicDocsSkill(const Request& req, Response& res);
+// Landing page ecosystem: the publicly listed integrations (no auth, read-only,
+// no user data) and the super-admin editor behind them.
+void homepageAppsPublic(const Request& req, Response& res);
+void adminHomepageAppsList(const Request& req, Response& res);
+void adminHomepageAppsCreate(const Request& req, Response& res);
+void adminHomepageAppsUpdate(const Request& req, Response& res);
+void adminHomepageAppsDelete(const Request& req, Response& res);
+void adminHomepageAppsIcon(const Request& req, Response& res);
 void appsList(const Request& req, Response& res);
 void appsCreate(const Request& req, Response& res);
 void appsGet(const Request& req, Response& res);

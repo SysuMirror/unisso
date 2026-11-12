@@ -13,11 +13,13 @@
         </button>
 
         <nav class="nav" :class="{ 'is-open': mobileMenuOpen }">
+          <RouterLink to="/" class="nav-link" :class="{ 'is-active': route.path === '/' }">首页</RouterLink>
           <RouterLink to="/developer" class="nav-link" :class="{ 'is-active': route.path === '/developer' }">开放平台</RouterLink>
           <RouterLink to="/docs" class="nav-link" :class="{ 'is-active': route.path === '/docs' }">开发者文档</RouterLink>
           <template v-if="store.user">
             <RouterLink to="/profile" class="nav-link" :class="{ 'is-active': route.path === '/profile' }">个人中心</RouterLink>
             <RouterLink v-if="store.user.is_super_admin" to="/admin/apps" class="nav-link" :class="{ 'is-active': route.path === '/admin/apps' }">应用</RouterLink>
+            <RouterLink v-if="store.user.is_super_admin" to="/admin/homepage" class="nav-link" :class="{ 'is-active': route.path === '/admin/homepage' }">首页配置</RouterLink>
             <RouterLink v-if="store.user.is_super_admin" to="/admin/users" class="nav-link" :class="{ 'is-active': route.path === '/admin/users' }">用户</RouterLink>
             <RouterLink v-if="store.user.is_super_admin" to="/admin/logs" class="nav-link" :class="{ 'is-active': route.path === '/admin/logs' }">日志</RouterLink>
             <span class="nav-divider" aria-hidden="true"></span>
@@ -40,7 +42,7 @@
 
     <img class="app-watermark" :src="logo" alt="" aria-hidden="true" />
 
-    <main class="container">
+    <main class="container" :class="{ 'container-home': isHomePage }">
       <RouterView />
     </main>
 
@@ -72,6 +74,9 @@ const router = useRouter()
 const mobileMenuOpen = ref(false)
 
 watch(() => route.fullPath, () => { mobileMenuOpen.value = false })
+
+// The landing page owns its own gutters: a full-bleed hero and marquee.
+const isHomePage = computed(() => route.path === '/')
 
 const isAuthPage = computed(() =>
   ['/login', '/register', '/verify-email', '/reset-password', '/authorize'].includes(route.path) ||

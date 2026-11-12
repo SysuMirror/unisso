@@ -96,6 +96,44 @@ CREATE TABLE IF NOT EXISTS migration_flags (
                "seed super admin from UNISSO_SSE_SUPER_ADMIN_IDS");
     }
 
+    // Landing page ecosystem list: the apps shown in the public marquee, owned
+    // by the super-admin editor at /admin/homepage.
+    runSql(R"SQL(
+CREATE TABLE IF NOT EXISTS homepage_apps (
+  id VARCHAR(36) NOT NULL PRIMARY KEY,
+  name VARCHAR(128) NOT NULL,
+  description VARCHAR(512) NULL,
+  icon VARCHAR(512) NULL,
+  url VARCHAR(512) NOT NULL,
+  sort_order INT NOT NULL DEFAULT 0,
+  is_visible TINYINT(1) NOT NULL DEFAULT 1,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci)SQL", "create homepage_apps");
+
+    // First boot: start from a curated list of what is already live, so the home
+    // page is never empty. Everything here is editable afterwards.
+    if (Db::exec("INSERT IGNORE INTO migration_flags (name) VALUES ('homepage_apps_seed_2026_11')") == 1) {
+        long long existing = 0;
+        {
+            auto rows = Db::query("SELECT COUNT(*) AS c FROM homepage_apps");
+            if (!rows.empty()) {
+                try { existing = std::stoll(rows.front().at("c")); } catch (...) {}
+            }
+        }
+        if (existing == 0) {
+            runSql(R"SQL(INSERT INTO homepage_apps
+  (id,name,description,icon,url,sort_order,is_visible,created_at,updated_at) VALUES
+  (UUID(),'集市主站','校园集市：二手交易、招募、活动与社区','',        'https://ssemarket.cn/',10,1,NOW(),NOW()),
+  (UUID(),'集市招聘','集市招聘：岗位发布与投递','https://image.ssemarket.cn/i/images/2026/09/10/cef96c21-95e9-44e8-b84f-ad388fc409c4.png','https://join.ssemarket.cn/',20,1,NOW(),NOW()),
+  (UUID(),'IWiki','知识库与文档协作','https://image.ssemarket.cn/i/images/2026/10/26/10a6eb4c-8011-41ed-84dd-68a0210804b8.png','https://iwiki.ssemarket.cn/',30,1,NOW(),NOW()),
+  (UUID(),'SSE 云平台','统一算力与部署平台：Pod、GPU、存储','',       'https://cloud.ssemarket.cn/',40,1,NOW(),NOW()),
+  (UUID(),'Octop','运维控制台，单点登录直达','',                      'https://octop.ssemarket.cn/',50,1,NOW(),NOW()),
+  (UUID(),'图灵科竞协会','图灵科竞协会统一平台','',                    'https://turing.ssemarket.cn/',60,1,NOW(),NOW())
+)SQL", "seed homepage apps");
+        }
+    }
+
     // One-time removal of everything the 2026-11 redesign retired.
     if (Db::exec("INSERT IGNORE INTO migration_flags (name) VALUES ('redesign_cleanup_2026_11')") == 1) {
         runSql("UPDATE applications SET kind='internal', status='approved', "

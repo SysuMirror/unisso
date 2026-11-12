@@ -57,6 +57,14 @@ void registerAll(Server& app) {
     app.get("/api/public/docs", handlers::publicDocsMeta);
     app.get("/api/public/docs/skill", handlers::publicDocsSkill);
 
+    // Landing page ecosystem (public list + super-admin editor).
+    app.get("/api/public/homepage-apps", handlers::homepageAppsPublic);
+    app.get("/api/admin/homepage-apps", handlers::adminHomepageAppsList);
+    app.post("/api/admin/homepage-apps", handlers::adminHomepageAppsCreate);
+    app.put("/api/admin/homepage-apps/{id}", handlers::adminHomepageAppsUpdate);
+    app.del("/api/admin/homepage-apps/{id}", handlers::adminHomepageAppsDelete);
+    app.post("/api/admin/homepage-apps/{id}/icon", handlers::adminHomepageAppsIcon);
+
     // Applications: first-party (admin-managed) and third-party (apply/review).
     app.get("/api/apps/integration-skill", handlers::appIntegrationSkill);
     app.get("/api/apps", handlers::appsList);

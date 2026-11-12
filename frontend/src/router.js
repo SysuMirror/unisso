@@ -3,6 +3,7 @@ import { store, loadMe } from './store'
 
 // Route-level code splitting: the phone only ever needs the QR-confirm chunk,
 // not the whole app bundle.
+const HomeView = () => import('./views/HomeView.vue')
 const LoginView = () => import('./views/LoginView.vue')
 const RegisterView = () => import('./views/RegisterView.vue')
 const VerifyEmailView = () => import('./views/VerifyEmailView.vue')
@@ -11,6 +12,7 @@ const QrConfirmView = () => import('./views/QrConfirmView.vue')
 const ProfileView = () => import('./views/ProfileView.vue')
 const AuthorizeView = () => import('./views/AuthorizeView.vue')
 const AdminAppsView = () => import('./views/AdminAppsView.vue')
+const AdminHomepageView = () => import('./views/AdminHomepageView.vue')
 const AdminUsersView = () => import('./views/AdminUsersView.vue')
 const AdminLogsView = () => import('./views/AdminLogsView.vue')
 const PrivacyView = () => import('./views/PrivacyView.vue')
@@ -19,7 +21,9 @@ const DeveloperView = () => import('./views/DeveloperView.vue')
 const NotFoundView = () => import('./views/NotFoundView.vue')
 
 const routes = [
-  { path: '/', redirect: '/profile' },
+  // Public landing page — the first thing a logged-out visitor sees, so no
+  // redirect to /login and no auth requirement.
+  { path: '/', name: 'home', component: HomeView },
   { path: '/login', name: 'login', component: LoginView },
   { path: '/register', name: 'register', component: RegisterView },
   { path: '/verify-email', name: 'verify-email', component: VerifyEmailView },
@@ -33,6 +37,7 @@ const routes = [
   { path: '/docs', name: 'docs', component: DocsView },
   { path: '/developer', name: 'developer', component: DeveloperView },
   { path: '/admin/apps', name: 'admin-apps', component: AdminAppsView, meta: { requiresAuth: true, requiresSuperAdmin: true } },
+  { path: '/admin/homepage', name: 'admin-homepage', component: AdminHomepageView, meta: { requiresAuth: true, requiresSuperAdmin: true } },
   { path: '/admin/users', name: 'admin-users', component: AdminUsersView, meta: { requiresAuth: true, requiresSuperAdmin: true } },
   { path: '/admin/logs', name: 'admin-logs', component: AdminLogsView, meta: { requiresAuth: true, requiresSuperAdmin: true } },
   { path: '/:pathMatch(.*)*', name: 'not-found', component: NotFoundView }

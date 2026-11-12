@@ -3357,3 +3357,13 @@ input:-webkit-autofill:focus {
         justify-content: center;
     }
 }
+
+/* ---------- landing page wrapper ---------- */
+
+/* The home view is full-bleed: hero and marquee run edge to edge, and the view
+   supplies its own gutters. Two classes so it also beats the responsive
+   `.container` padding rules above regardless of source order. */
+.container.container-home {
+    max-width: none;
+    padding: 0;
+}
