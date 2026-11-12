@@ -4,13 +4,29 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="light" />
+    <meta name="description" content="UniSSO 统一身份认证 — 外部平台接入开放文档：OAuth2 授权码 + PKCE(S256)、OIDC Discovery 与 JWKS 公开只读。" />
     <link rel="icon" type="image/png" href="/favicon.png" />
+    <!-- AI / crawler handoff: the human docs pages (/developer, /docs) also return
+         this Markdown guide when the client sends `Accept: text/markdown`; agents
+         that cannot run JS can follow this alternate. -->
+    <link rel="alternate" type="text/markdown" href="/api/public/docs/skill?kind=external"
+          title="UniSSO 接入规范 (SKILL.md)" />
+    <link rel="alternate" type="text/plain" href="/llms.txt" title="llms.txt" />
     <title>统一身份认证</title>
   </head>
   <body>
     <div id="app">
       <div class="boot"><span class="boot-spin"></span><span class="boot-text">统一身份认证</span></div>
     </div>
+    <noscript>
+      <p>本页为单页应用，需要 JavaScript。接入文档与端点元数据可免登录直接获取：</p>
+      <ul>
+        <li><a href="/api/public/docs/skill?kind=external">接入规范 SKILL.md</a></li>
+        <li><a href="/llms.txt">llms.txt（机器可读索引）</a></li>
+        <li><a href="/api/public/docs">端点与 scope 目录 (JSON)</a></li>
+        <li><a href="/.well-known/openid-configuration">OIDC Discovery</a></li>
+      </ul>
+    </noscript>
     <style>
       .boot{position:fixed;inset:0;display:flex;flex-direction:column;gap:14px;
             align-items:center;justify-content:center;background:#fbfbfa;

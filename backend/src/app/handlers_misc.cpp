@@ -2,6 +2,7 @@
 
 #include <curl/curl.h>
 
+#include <cctype>
 #include <chrono>
 #include <condition_variable>
 #include <filesystem>
@@ -58,6 +59,18 @@ size_t discardResponse(char*, size_t size, size_t nmemb, void*) {
     return size * nmemb;
 }
 
+// True when the client explicitly prefers Markdown — e.g. a coding agent's
+// fetch tool sending `Accept: text/markdown`. Case-insensitive substring test;
+// q-values are deliberately ignored (a plain "asks for markdown" is the signal
+// we act on, otherwise we serve the SPA as usual).
+bool wantsMarkdown(const Request& req) {
+    std::string accept = req.get_header_value("Accept");
+    for (char& c : accept) {
+        c = static_cast<char>(::tolower(static_cast<unsigned char>(c)));
+    }
+    return accept.find("text/markdown") != std::string::npos;
+}
+
 }  // namespace
 
 bool spaFallback(const Request& req, Response& res) {
@@ -69,6 +82,20 @@ bool spaFallback(const Request& req, Response& res) {
 
     auto& cfg = AppConfig::get();
     std::string path = req.path;
+
+    // AI / crawler handoff: the human docs pages (/developer, /docs) are a JS
+    // SPA whose raw HTML is an empty shell — an agent that fetches them gets
+    // nothing. When such a client asks for Markdown, serve the real guide.
+    if ((path == "/docs" || path == "/developer") && wantsMarkdown(req)) {
+        std::string name, content;
+        if (handlers::loadIntegrationSkillMarkdown("external", name, content)) {
+            res.statusCode = 200;
+            res.headers["Content-Type"] = "text/markdown; charset=utf-8";
+            res.headers["Cache-Control"] = "no-store";
+            res.body = std::move(content);
+            return true;
+        }
+    }
 
     // Persistent uploads (avatars, app icons).
     if (path.rfind("/uploads/", 0) == 0) {

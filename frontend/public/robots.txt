@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+
+# 机器可读接入索引（供编码助手 / 爬虫）
+# llms.txt: https://sso.ssemarket.cn/llms.txt
+# OIDC Discovery: https://sso.ssemarket.cn/.well-known/openid-configuration

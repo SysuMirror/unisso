@@ -1,0 +1,20 @@
+# UniSSO 统一身份认证 — 开放接入
+
+> 外部平台通过标准 OAuth2 授权码 + PKCE(S256) 接入 UniSSO 登录。本文件供编码助手 / 爬虫定位机器可读资源；人类可读页面见 /developer 与 /docs。
+
+## 接入规范（首选，热更）
+- [外部平台接入 SKILL.md](https://sso.ssemarket.cn/api/public/docs/skill?kind=external): Markdown，含授权码流程、PKCE、错误契约、部署守则、验收清单。人类文档页 `/docs`、`/developer` 在请求头 `Accept: text/markdown` 时也会直接返回本文档。
+
+## 平台元数据（公开只读）
+- [OIDC Discovery](https://sso.ssemarket.cn/.well-known/openid-configuration)
+- [JWKS 公钥](https://sso.ssemarket.cn/.well-known/jwks.json)
+- [端点与 scope 目录 (JSON)](https://sso.ssemarket.cn/api/public/docs)
+
+## 关键端点
+- 授权（前端路由，302）: `GET https://sso.ssemarket.cn/authorize`
+- 换取 / 刷新 token: `POST https://sso.ssemarket.cn/api/oauth/token`
+- 用户信息: `GET https://sso.ssemarket.cn/api/oauth/userinfo`
+- 客户端 / token 自检: `POST https://sso.ssemarket.cn/api/oauth/introspect`
+
+## 注册接入应用
+- 学院成员在 https://sso.ssemarket.cn/developer 自助注册（提交即生效），登记 `redirect_uris` 与 `allowed_scopes`，取得 `client_id` / `client_secret`（secret 仅显示一次，只能保存在后端）。

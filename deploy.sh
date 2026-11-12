@@ -23,10 +23,22 @@ if [ ! -x build/unisso_v2 ] || \
     (cd build && cmake .. -DCMAKE_BUILD_TYPE=Release >/dev/null && make -j2)
 fi
 
-# Build the SPA if the static bundle is missing.
-if [ ! -f web/index.html ] && [ -d "$ROOT/frontend" ]; then
-    if [ -s "$HOME/.nvm/nvm.sh" ]; then . "$HOME/.nvm/nvm.sh"; fi
-    (cd "$ROOT/frontend" && npm install --no-audit --no-fund && npm run build)
+# Build the SPA when the bundle is missing or any frontend source (incl.
+# frontend/public — llms.txt, robots.txt, index.html meta) is newer than it.
+if [ -d "$ROOT/frontend" ]; then
+    spa_stale=0
+    if [ ! -f web/index.html ]; then
+        spa_stale=1
+    elif [ -n "$(find "$ROOT/frontend/src" "$ROOT/frontend/public" \
+                   "$ROOT/frontend/index.html" "$ROOT/frontend/package.json" \
+                   "$ROOT/frontend/vite.config.js" \
+                   -newer web/index.html -print -quit 2>/dev/null)" ]; then
+        spa_stale=1
+    fi
+    if [ "$spa_stale" = "1" ]; then
+        if [ -s "$HOME/.nvm/nvm.sh" ]; then . "$HOME/.nvm/nvm.sh"; fi
+        (cd "$ROOT/frontend" && npm install --no-audit --no-fund && npm run build)
+    fi
 fi
 
 exec build/unisso_v2

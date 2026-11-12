@@ -113,3 +113,11 @@ claims（按已授权的 scope 裁剪）：`sub`/`sso_sub`、`sse_sub`（已绑�
 - 错 secret：`introspect` / `token` 得 401 `invalid_client`
 - 未登记的回调地址：授权被拒 `invalid_redirect_uri`
 - 多入口逐个走通（每个 origin 的 redirect_uri 均被接受）
+
+## 机器可读入口与边界（给编码助手）
+
+- 站点级索引：`GET https://sso.ssemarket.cn/llms.txt`
+- 本规范（热更，永远以此为准）：`GET https://sso.ssemarket.cn/api/public/docs/skill?kind=external`
+- 端点 / scope 目录（JSON）：`GET https://sso.ssemarket.cn/api/public/docs`
+- 人类文档页 `/developer`、`/docs` 是单页应用：若你的抓取只得到空 HTML 外壳，请改在请求头带 `Accept: text/markdown`（会直接返回本规范），或直接读上面的 skill URL。
+- **能力边界（别假设存在）**：本服务**不提供** RP-initiated logout（无 `end_session_endpoint`），也**没有** RFC 7009 令牌吊销端点（discovery 中均未声明）。`access_token` 短时效（`expires_in=3600`）；要让某用户的授权失效，走「撤销授权」`DELETE /api/consents/{id}`，或让用户改密 / 登出。切勿在代码里假设有 `revocation_endpoint`。

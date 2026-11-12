@@ -533,6 +533,7 @@ void oidcDiscovery(const Request&, Response& res) {
     obj["introspection_endpoint"] = JsonValue(absolute("/api/oauth/introspect"));
     obj["jwks_uri"] = JsonValue(absolute("/.well-known/jwks.json"));
     obj["response_types_supported"] = JsonValue(std::vector<std::string>{"code"});
+    obj["response_modes_supported"] = JsonValue(std::vector<std::string>{"query"});
     obj["grant_types_supported"] = JsonValue(std::vector<std::string>{"authorization_code", "refresh_token"});
     obj["subject_types_supported"] = JsonValue(std::vector<std::string>{"public"});
     obj["id_token_signing_alg_values_supported"] = JsonValue(std::vector<std::string>{"RS256"});
