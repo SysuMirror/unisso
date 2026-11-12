@@ -182,7 +182,12 @@ onMounted(load)
 </script>
 
 <style scoped>
+/* The home page is full-bleed (see .container-home in theme.css), so every
+   section re-creates the shared content measure itself. One custom property
+   drives the gutters for all of them, and each breakpoint just narrows it. */
 .home {
+  --home-max: 1120px;
+  --home-pad: 32px;
   padding: 0 0 8px;
 }
 
@@ -191,14 +196,14 @@ onMounted(load)
 .hero {
   position: relative;
   overflow: hidden;
-  padding: 76px 32px 64px;
+  padding: 76px var(--home-pad) 64px;
   border-bottom: 1px solid var(--line);
   background: var(--bg);
 }
 .hero-inner {
   position: relative;
   z-index: 2;
-  max-width: 1120px;
+  max-width: var(--home-max);
   margin: 0 auto;
 }
 .hero-aurora,
@@ -386,9 +391,9 @@ onMounted(load)
   align-items: flex-end;
   justify-content: space-between;
   gap: 20px;
-  max-width: 1120px;
+  max-width: var(--home-max);
   margin: 0 auto 26px;
-  padding: 0 32px;
+  padding: 0 var(--home-pad);
 }
 .eco-title {
   font-size: 22px;
@@ -509,14 +514,60 @@ onMounted(load)
   white-space: nowrap;
 }
 
+/* ------------------------------ why YatSSO ------------------------------ */
+/* These classes also exist in theme.css, but with page-agnostic sizes (and no
+   measure of their own) — on a full-bleed page that let the three columns run
+   edge to edge. They are re-declared here with a home-scoped prefix so this
+   page owns its own scale instead of inheriting whichever theme layer wins. */
+
+.home .section-block {
+  max-width: var(--home-max);
+  margin: 0 auto;
+  padding: 56px var(--home-pad) 8px;
+}
+.home .section-title {
+  font-size: 22px;
+  letter-spacing: -.03em;
+}
+.home .section-sub {
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--ink-faint);
+}
+.home .feature-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 32px;
+  margin-top: 28px;
+}
+.home .feature {
+  padding-top: 18px;
+  border-top: 1px solid var(--ink);
+}
+.home .feature h3 {
+  margin-top: 8px;
+  font-size: 15px;
+  font-weight: 600;
+}
+.home .feature p {
+  margin-top: 6px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--ink-soft);
+}
+
 /* -------------------------------- CTA -------------------------------- */
 
 .cta {
-  max-width: 1120px;
+  max-width: var(--home-max);
   margin: 0 auto;
-  padding: 56px 32px 24px;
+  padding: 56px var(--home-pad) 24px;
 }
+/* Deliberately narrower than the grid above: a single line of copy plus two
+   buttons does not need the full 1120px, it just left the card looking empty. */
 .cta-inner {
+  max-width: 840px;
+  margin: 0 auto;
   padding: 40px 36px;
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
@@ -541,18 +592,63 @@ onMounted(load)
   margin-top: 26px;
 }
 
-@media (max-width: 900px) {
-  .hero { padding: 52px 20px 44px; }
-  .hero-orbit { display: none; }
-  .eco-head { padding: 0 20px; flex-direction: column; align-items: flex-start; }
-  .cta { padding: 40px 20px 12px; }
-  .cta-inner { padding: 28px 22px; }
+/* --------------------------- multi-device ladder --------------------------- */
+/* Large tablet / small laptop: the orbit would start crowding the headline, and
+   three feature columns get too narrow to read comfortably. */
+@media (max-width: 1100px) {
+  .home { --home-pad: 26px; }
+  .hero-orbit { opacity: .55; }
+  .home .feature-grid { gap: 26px; }
 }
-@media (max-width: 520px) {
+@media (max-width: 960px) {
+  .home .feature-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  /* Odd third card spans the row instead of leaving a dangling half-column. */
+  .home .feature-grid > .feature:last-child { grid-column: 1 / -1; }
+}
+@media (max-width: 900px) {
+  .home { --home-pad: 20px; }
+  .hero { padding: 52px var(--home-pad) 44px; }
+  .hero-orbit { display: none; }
+  .hero-title { font-size: clamp(28px, 6.4vw, 42px); }
+  .eco-head { flex-direction: column; align-items: flex-start; gap: 10px; }
+  .home .section-block { padding: 44px var(--home-pad) 8px; }
+  .cta { padding: 40px var(--home-pad) 12px; }
+  .cta-inner { padding: 30px 24px; }
+}
+/* Phone: single column everywhere, and the primary actions become full-width
+   so they stay easy to hit (theme.css already floors buttons at 44px). */
+@media (max-width: 720px) {
+  .hero { padding: 40px var(--home-pad) 36px; }
+  .hero-sub { font-size: 14px; line-height: 1.85; }
   .hero-facts { gap: 8px 16px; font-size: 11.5px; }
-  .tile { width: 246px; padding: 12px 13px; }
+  .home .feature-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 22px;
+    margin-top: 22px;
+  }
+  .home .feature-grid > .feature:last-child { grid-column: auto; }
+  .cta-inner h2 { font-size: 21px; }
+  .hero-actions .btn,
+  .cta-actions .btn {
+    flex: 1 1 100%;
+    justify-content: center;
+  }
+  .marquee { padding-bottom: 32px; }
+}
+@media (max-width: 560px) {
+  .home { --home-pad: 16px; }
+  /* The forced break reads as a stub line on narrow screens — let it wrap. */
+  .hero-title br { display: none; }
+  .hero-eyebrow { font-size: 11px; }
+  .tile { width: 240px; padding: 12px 13px; gap: 11px; }
   .tile-icon { width: 38px; height: 38px; }
+  .tile-desc { font-size: 11px; }
   .marquee-fade { width: 44px; }
+  .cta-inner { padding: 26px 18px; }
+}
+@media (max-width: 380px) {
+  .tile { width: 214px; }
+  .hero-facts { font-size: 11px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .marquee-track,
