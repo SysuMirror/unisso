@@ -462,6 +462,7 @@ void oauthUserinfo(const Request& req, Response& res);
 void oauthPasswordVerify(const Request& req, Response& res);
 void oauthSessionVerify(const Request& req, Response& res);
 void oauthSessionRevoke(const Request& req, Response& res);
+void oauthUsersList(const Request& req, Response& res);
 void oidcDiscovery(const Request& req, Response& res);
 void oidcJwks(const Request& req, Response& res);
 

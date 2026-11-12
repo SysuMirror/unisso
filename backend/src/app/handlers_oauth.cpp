@@ -605,7 +605,7 @@ std::string ssoCookieName() {
     return util::env("UNISSO_SSO_COOKIE_NAME", "unisso_sid");
 }
 
-JsonValue userClaimsJson(const User& user) {
+std::map<std::string, JsonValue> userClaimsJson(const User& user) {
     std::map<std::string, JsonValue> u;
     u["sub"] = JsonValue(user.id);
     u["sso_sub"] = JsonValue(user.id);
@@ -616,7 +616,7 @@ JsonValue userClaimsJson(const User& user) {
     u["email"] = JsonValue(user.email);
     u["picture"] = JsonValue(user.avatar);
     u["student_id"] = JsonValue(user.studentId);
-    return JsonValue(u);
+    return u;
 }
 
 void addSsoCookieMeta(std::map<std::string, JsonValue>& obj, const std::string& sid,
@@ -662,7 +662,7 @@ void oauthPasswordVerify(const Request& req, Response& res) {
 
     std::map<std::string, JsonValue> obj;
     obj["ok"] = JsonValue(true);
-    obj["user"] = userClaimsJson(*user);
+    obj["user"] = JsonValue(userClaimsJson(*user));
     addSsoCookieMeta(obj, sid, util::nowEpoch() + static_cast<long long>(hours) * 3600);
     http::ok(res, JsonValue(obj));
 }
@@ -712,7 +712,7 @@ void oauthSessionVerify(const Request& req, Response& res) {
 
     std::map<std::string, JsonValue> obj;
     obj["ok"] = JsonValue(true);
-    obj["user"] = userClaimsJson(*user);
+    obj["user"] = JsonValue(userClaimsJson(*user));
     addSsoCookieMeta(obj, sid, nextExpiry);
     http::ok(res, JsonValue(obj));
 }
@@ -729,6 +729,29 @@ void oauthSessionRevoke(const Request& req, Response& res) {
     Cache::del("session:" + sid);
     std::map<std::string, JsonValue> obj;
     obj["ok"] = JsonValue(true);
+    http::ok(res, JsonValue(obj));
+}
+
+// Directory sync for first-party platforms: every user's profile, gated by the
+// exact same permission as 无感登录 (internal + m2m_enabled, see
+// m2mAuthorized). Returns the same claim fields as password/verify plus
+// active/created_at/last_login_at; never password hashes or admin flags.
+void oauthUsersList(const Request& req, Response& res) {
+    std::string clientId = http::input(req, "client_id");
+    if (!m2mAuthorized(req, res, clientId)) return;
+
+    std::vector<JsonValue> items;
+    for (const auto& user : repo::listUsers()) {
+        std::map<std::string, JsonValue> claims = userClaimsJson(user);
+        claims["active"] = JsonValue(user.isActive);
+        claims["created_at"] = user.createdAt.empty() ? JsonValue() : JsonValue(user.createdAt);
+        claims["last_login_at"] = user.lastLoginAt.empty() ? JsonValue() : JsonValue(user.lastLoginAt);
+        items.push_back(JsonValue(claims));
+    }
+    std::map<std::string, JsonValue> obj;
+    obj["ok"] = JsonValue(true);
+    obj["total"] = jsonx::num(static_cast<long long>(items.size()));
+    obj["users"] = JsonValue(items);
     http::ok(res, JsonValue(obj));
 }
 

@@ -25,6 +25,17 @@ Content-Type: application/json
 - 平台按响应的 `sso_cookie_*` 三个字段种 Cookie（Domain=.ssemarket.cn，HttpOnly/Secure/Lax）。**以响应字段为准，不要硬编码名字**（2026-11-05 起默认名 `unisso_sid`，旧名 `sse_sso` 兜底到 2026-11-12）
 - 错误契约：401 `invalid_credentials`（邮箱或密码错误）／403 `password_verify_forbidden`（client 不合规：查 client_id 是否配错、应用是否内接且开关开启）／429 `too_many_attempts`（同 ip+email 5 败锁 15 分钟，勿自动重试）
 
+## 用户目录（查询全部用户资料）
+
+```
+POST https://sso.ssemarket.cn/api/oauth/users/list
+Content-Type: application/json
+{"client_id":"...","client_secret":"..."}
+```
+
+- 200：`{ok,total,users[]}`；users[] 每项含 `sub/sse_sub/internal/preferred_username/name/email/picture/student_id/active/created_at/last_login_at`（无密码哈希、无管理员标记）
+- 权限与无感登录**完全一致**：内接应用 + 打开"无感登录"开关（m2m_enabled），否则 403 `password_verify_forbidden`；凭据错误 401 `invalid_client`
+
 ## 静默 SSO（换平台自动进）
 
 ```

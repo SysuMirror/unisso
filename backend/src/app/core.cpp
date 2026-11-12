@@ -1375,7 +1375,8 @@ bool validateCsrf(const Request& req, Response& res) {
         req.path == "/api/logs/client" ||
         req.path == "/api/oauth/password/verify" ||
         req.path == "/api/oauth/session/verify" ||
-        req.path == "/api/oauth/session/revoke") return true;
+        req.path == "/api/oauth/session/revoke" ||
+        req.path == "/api/oauth/users/list") return true;
 
     auto& cfg = AppConfig::get();
     std::vector<std::string> allowed;
