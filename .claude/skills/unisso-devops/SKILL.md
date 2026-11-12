@@ -35,6 +35,13 @@ git push origin main
     4. 健康检查（dep.health = "/"）→ app 上报 ready
 ```
 
+> **坑：第 1 步的 `git fetch` 跑在 `su -l cloud` 里，拿不到平台注入的代理 env**，pod 直连 `github.com:443` 一旦被断（如 2026-11-13），webhook 会**静默失败**：`deploys.run` 返回 `clone 失败: curl 28 … port 443`、`deploys.json` 的 `last_ref` 不变、`audit.log` 只有 `matches=1` 无报错。修法（对 pod 持久）：
+> ```bash
+> sudo kubectl -n clouds exec <pod> -- su -l cloud -c \
+>   'git config --global http.proxy http://172.16.156.28:7890; git config --global https.proxy http://172.16.156.28:7890'
+> ```
+> 代理地址即 `siteconf.proxy_env_defaults()` 的 `PROXY_URL`（宿主 mihomo）。改完再手动触发一次 `deploys.run`（见 §3）。
+
 **deploy.sh（仓库根目录）职责（v2）**：在 pod 内按 mtime 增量 `cmake` 编译 `backend/`（产物 `backend/build/unisso_v2`）；若 `frontend/` 源文件（含 `frontend/public/`、`index.html`）比 `backend/web/index.html` 新则 `npm install && npm run build` 重建 SPA；最后 `exec build/unisso_v2`。**改动的文件在 `git reset --hard` 后会重置 mtime → 触发重编译，重启后有约 10–40s 502（编译期），属预期。**（v1 的 venv/requirements/start.py 描述已过时。）
 
 改 yatterra 侧代码（`/opt/yatterra/web/*.py`）后要 `sudo kill -HUP <gunicorn master pid>` graceful reload；`deploys.json` 是每次请求现读的，改完即生效不用重启。
