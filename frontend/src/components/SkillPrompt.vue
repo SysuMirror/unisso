@@ -1,10 +1,8 @@
 <template>
   <section class="skill-prompt">
     <div class="skill-prompt-main">
-      <div class="skill-prompt-head">
-        <span class="skill-prompt-badge">一键接入</span>
-        <h2 class="skill-prompt-title">把这句话交给 AI，自动完成接入与开发</h2>
-      </div>
+      <div class="eyebrow"><span class="eyebrow-dot" aria-hidden="true"></span>一键接入</div>
+      <h2 class="skill-prompt-title">把这句话交给 AI，自动完成接入与开发</h2>
       <p class="skill-prompt-sub">
         复制下面的提示词，粘贴给 Claude / Cursor 等编码助手；它会读取官方接入规范，
         在你的项目里实现 UniSSO 登录并自测全链路。
@@ -74,55 +72,44 @@ async function copy() {
 </script>
 
 <style scoped>
+/* Editorial band — same language as the rest of the page: transparent
+   paper, hairline rules, small-caps eyebrow, mono code box. No card,
+   no gradient, no extra accent. */
 .skill-prompt {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 20px;
-  margin: 0 0 28px;
-  padding: 18px 20px;
-  border: 1px solid var(--brand-soft, #eaf1ff);
-  border-left: 3px solid var(--brand, #3370ff);
-  border-radius: var(--radius, 12px);
-  background: linear-gradient(180deg, var(--brand-tint, #f5f8ff), #fff);
+  gap: 24px;
+  margin: 22px 0 32px;
 }
 .skill-prompt-main { min-width: 0; flex: 1; }
-.skill-prompt-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.skill-prompt-badge {
-  display: inline-block;
-  padding: 2px 9px;
-  border-radius: 999px;
-  background: var(--brand, #3370ff);
-  color: #fff;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: .04em;
-}
 .skill-prompt-title {
-  font-size: 15px;
-  font-weight: 650;
-  letter-spacing: -.01em;
-  color: var(--ink, #171717);
+  margin-top: 10px;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -.02em;
+  color: var(--ink);
 }
 .skill-prompt-sub {
-  margin-top: 7px;
+  margin-top: 6px;
+  max-width: 640px;
   font-size: 12.5px;
-  line-height: 1.75;
-  color: var(--ink-soft, #5f6368);
+  line-height: 1.8;
+  color: var(--ink-soft);
 }
 .skill-prompt-code {
-  margin: 12px 0 0;
-  padding: 12px 14px;
-  border-radius: var(--radius-sm, 8px);
-  background: #fbfcff;
-  border: 1px solid var(--line, #e8e8e8);
+  margin: 14px 0 0;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #fafafa;
   overflow-x: auto;
 }
 .skill-prompt-code code {
-  font-family: var(--mono, monospace);
+  font-family: var(--mono);
   font-size: 12px;
-  line-height: 1.7;
-  color: var(--ink, #171717);
+  line-height: 1.75;
+  color: var(--ink);
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -134,7 +121,12 @@ async function copy() {
   flex: 0 0 auto;
   min-width: 132px;
 }
-.skill-prompt-link { font-size: 12px; text-align: center; color: var(--brand-ink, #245bdb); }
+.skill-prompt-link {
+  font-size: 11.5px;
+  text-align: center;
+  color: var(--brand-ink);
+}
+.skill-prompt-link:hover { text-decoration: underline; text-underline-offset: 3px; }
 
 @media (max-width: 720px) {
   .skill-prompt { flex-direction: column; }
