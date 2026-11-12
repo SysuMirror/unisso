@@ -8,3 +8,6 @@ frontend/dist/
 backend/log.log
 *.log
 SSE_OAUTH_APP.sql
+
+# Local sync/backup artifacts (may contain credentials)
+backups/
