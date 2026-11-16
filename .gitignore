@@ -11,3 +11,7 @@ SSE_OAUTH_APP.sql
 
 # Local sync/backup artifacts (may contain credentials)
 backups/
+
+# Local runtime artifacts and one-off deploy backups
+logs/
+deploy.sh.bak*
