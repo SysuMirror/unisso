@@ -3,8 +3,12 @@
 set -eu
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT/backend"
+# RECOVERY 2026-11-15: runtime libs on persistent disk; pod rebuild needs no apt
+ export LD_LIBRARY_PATH=/home/cloud/deploy/unisso/libs/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH:-}
 
 # Build dependencies live in the ephemeral container layer, not /home/cloud.
+# skip apt when the prebuilt binary exists (runtime libs in libs/)
+if [ ! -x build/unisso_v2 ]; then
 if ! command -v cmake >/dev/null 2>&1 \
    || [ ! -f /usr/include/mysql/mysql.h ] \
    || [ ! -f /usr/include/hiredis/hiredis.h ] \
@@ -14,6 +18,7 @@ if ! command -v cmake >/dev/null 2>&1 \
     sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
         cmake libssl-dev default-libmysqlclient-dev libhiredis-dev zlib1g-dev \
         libcurl4-openssl-dev libcrypt-dev libcpp-httplib-dev >/dev/null 2>&1 || true
+fi
 fi
 
 # Rebuild when any backend source is newer than the binary.

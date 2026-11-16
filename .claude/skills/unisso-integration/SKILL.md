@@ -6,7 +6,7 @@ description: 把学院内部平台接入 UniSSO 无感登录（M2M 密码校验 
 # UniSSO 内部平台无感登录接入
 
 内部平台（first-party）接入 = 后端 M2M 密码校验 + 共享会话 Cookie。用户永不跳转 unisso。
-UniSSO 只负责身份（sub/sse_sub/internal/name/email/picture）；权限与角色由各平台自行判定。
+UniSSO 只负责身份（sub/sse_sub/internal/name/email/picture）与**开发者权限标记**（developer，见下）；其余权限与角色由各平台自行判定。
 
 ## 前置
 
@@ -21,7 +21,7 @@ Content-Type: application/json
 {"client_id":"...","client_secret":"...","email":"...","password":"..."}
 ```
 
-- 200：`user{sub,sse_sub,internal,name,email,picture}` + `sso_session` + `sso_cookie_name/sso_cookie_domain/sso_max_age`
+- 200：`user{sub,sse_sub,internal,developer,name,email,picture}` + `sso_session` + `sso_cookie_name/sso_cookie_domain/sso_max_age`
 - 平台按响应的 `sso_cookie_*` 三个字段种 Cookie（Domain=.ssemarket.cn，HttpOnly/Secure/Lax）。**以响应字段为准，不要硬编码名字**（2026-11-05 起默认名 `unisso_sid`，旧名 `sse_sso` 兜底到 2026-11-12）
 - 错误契约：401 `invalid_credentials`（邮箱或密码错误）／403 `password_verify_forbidden`（client 不合规：查 client_id 是否配错、应用是否内接且开关开启）／429 `too_many_attempts`（同 ip+email 5 败锁 15 分钟，勿自动重试）
 
@@ -33,8 +33,31 @@ Content-Type: application/json
 {"client_id":"...","client_secret":"..."}
 ```
 
-- 200：`{ok,total,users[]}`；users[] 每项含 `sub/sse_sub/internal/preferred_username/name/email/picture/student_id/active/created_at/last_login_at`（无密码哈希、无管理员标记）
+- 200：`{ok,total,users[]}`；users[] 每项含 `sub/sse_sub/internal/developer/preferred_username/name/email/picture/student_id/active/created_at/last_login_at`（无密码哈希、无管理员标记）
 - 权限与无感登录**完全一致**：内接应用 + 打开"无感登录"开关（m2m_enabled），否则 403 `password_verify_forbidden`；凭据错误 401 `invalid_client`
+
+## 开发者权限（developer）
+
+平台需要判断「这个用户是不是开发者」（例如能否自助注册对外应用）时，读身份里的
+`developer` 布尔即可：password/verify、session/verify、users/list、/api/oauth/userinfo
+的返回里都带这个字段。标记存在 users.is_developer，默认 false。
+
+写入用专用 update 接口（后端调用，凭据与无感登录同一套，**不需要**用户登录态）：
+
+```
+POST https://sso.ssemarket.cn/api/oauth/developer/update
+Content-Type: application/json
+{"client_id":"...","client_secret":"...","email":"alice@mail.sysu.edu.cn","is_developer":true}
+```
+
+- 定位用户三选一（按此顺序取第一个非空）：`user_id`（SSO 的 sub）／`email`／`sse_user_id`（集市 sub）
+- `is_developer` 省略即视为 true（添加开发者权限）；传 `false`（或 `0`）撤销
+- 200：`{ok:true,developer:true,user{...}}`，user 即上面的标准 claim 集
+- 幂等：重复提交同一值不会出错，可当作“开通”动作放心重试
+- 错误契约：401 `invalid_client`／403 `password_verify_forbidden`（非内接或未开无感开关）
+  ／400 `invalid_request`（缺定位字段或 is_developer 取值非法）／404 `user_not_found`／500 `update_failed`
+
+超管侧同样可改：`PUT /api/admin/users/{id}` 带 `is_developer=true|false`。
 
 ## 静默 SSO（换平台自动进）
 

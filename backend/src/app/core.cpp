@@ -905,6 +905,7 @@ JsonValue userClaims(const User& user, const std::vector<std::string>& granted) 
         claims["roles"] = JsonValue(roles);
     }
     claims["internal"] = JsonValue(user.isInternal);
+    claims["developer"] = JsonValue(user.isDeveloper);
     return JsonValue(claims);
 }
 
@@ -1376,7 +1377,8 @@ bool validateCsrf(const Request& req, Response& res) {
         req.path == "/api/oauth/password/verify" ||
         req.path == "/api/oauth/session/verify" ||
         req.path == "/api/oauth/session/revoke" ||
-        req.path == "/api/oauth/users/list") return true;
+        req.path == "/api/oauth/users/list" ||
+        req.path == "/api/oauth/developer/update") return true;
 
     auto& cfg = AppConfig::get();
     std::vector<std::string> allowed;

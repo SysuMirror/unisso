@@ -47,6 +47,7 @@ void registerAll(Server& app) {
     app.post("/api/oauth/session/verify", handlers::oauthSessionVerify);
     app.post("/api/oauth/session/revoke", handlers::oauthSessionRevoke);
     app.post("/api/oauth/users/list", handlers::oauthUsersList);
+    app.post("/api/oauth/developer/update", handlers::oauthDeveloperUpdate);
     app.post("/api/oauth/introspect", handlers::oauthIntrospect);
     app.get("/api/oauth/userinfo", handlers::oauthUserinfo);
     app.get("/.well-known/openid-configuration", handlers::oidcDiscovery);

@@ -51,6 +51,10 @@ void run() {
     addColumn("users", "is_internal", "TINYINT(1) NOT NULL DEFAULT 0");
     addColumn("users", "sse_user_id", "VARCHAR(64) NULL");
     addColumn("users", "is_super_admin", "TINYINT(1) NOT NULL DEFAULT 0");
+    // Developer flag: first-party platforms manage it through
+    // POST /api/oauth/developer/update, the admin console through PUT
+    // /api/admin/users/{id}.
+    addColumn("users", "is_developer", "TINYINT(1) NOT NULL DEFAULT 0");
     addColumn("applications", "m2m_enabled", "TINYINT(1) NOT NULL DEFAULT 0");
     // Two-track access: first-party platforms vs third-party OAuth applications.
     addColumn("applications", "kind", "VARCHAR(16) NOT NULL DEFAULT 'internal'");
