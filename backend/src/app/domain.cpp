@@ -48,6 +48,7 @@ User mapUser(const std::map<std::string, std::string>& row) {
     user.isAdmin = isTrue(get("is_admin"));
     user.isInternal = isTrue(get("is_internal"));
     user.isSuperAdmin = isTrue(get("is_super_admin"));
+    user.isDeveloper = isTrue(get("is_developer"));
     user.sseUserId = get("sse_user_id");
     user.createdAt = get("created_at");
     user.updatedAt = get("updated_at");
@@ -194,6 +195,11 @@ bool updateUserPassword(const std::string& userId, const std::string& passwordHa
 
 bool updateUserLastLogin(const std::string& userId) {
     return Db::exec("UPDATE users SET last_login_at=NOW() WHERE id=" + Db::quote(userId)) >= 0;
+}
+
+bool updateUserDeveloper(const std::string& userId, bool isDeveloper) {
+    return Db::exec("UPDATE users SET is_developer=" + std::string(isDeveloper ? "1" : "0") +
+                    ", updated_at=NOW() WHERE id=" + Db::quote(userId)) >= 0;
 }
 
 std::vector<Application> listApplications() {
@@ -343,6 +349,7 @@ JsonValue userJson(const User& user, bool withRelations) {
     obj["is_admin"] = JsonValue(user.isAdmin);
     obj["is_internal"] = JsonValue(user.isInternal);
     obj["is_super_admin"] = JsonValue(user.isSuperAdmin);
+    obj["is_developer"] = JsonValue(user.isDeveloper);
     obj["created_at"] = JsonValue(user.createdAt);
     obj["last_login_at"] = JsonValue(user.lastLoginAt);
     if (withRelations) {

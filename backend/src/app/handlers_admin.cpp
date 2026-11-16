@@ -636,6 +636,7 @@ void adminUsersUpdate(const Request& req, Response& res) {
     std::string active = http::input(req, "is_active");
     std::string isAdminValue = http::input(req, "is_admin");
     std::string isSuperValue = http::input(req, "is_super_admin");
+    std::string isDevValue = http::input(req, "is_developer");
     std::string fullName = util::trim(http::input(req, "full_name"));
     std::string studentId = util::trim(http::input(req, "student_id"));
     std::string username = util::trim(http::input(req, "username"));
@@ -671,6 +672,8 @@ void adminUsersUpdate(const Request& req, Response& res) {
             sets.push_back("is_super_admin=1");
         }
     }
+    if (!isDevValue.empty())
+        sets.push_back("is_developer=" + std::string(isDevValue == "true" || isDevValue == "1" ? "1" : "0"));
     if (!fullName.empty()) sets.push_back("full_name=" + Db::quote(fullName));
     if (!studentId.empty()) sets.push_back("student_id=" + Db::quote(studentId));
     if (!username.empty() && username != target->username) {

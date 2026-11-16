@@ -543,7 +543,7 @@ void oidcDiscovery(const Request&, Response& res) {
     obj["code_challenge_methods_supported"] = JsonValue(std::vector<std::string>{"S256"});
     obj["claims_supported"] = JsonValue(std::vector<std::string>{
         "sub", "preferred_username", "name", "picture", "student_id", "email",
-        "email_verified", "roles", "internal", "sso_sub", "sse_sub"});
+        "email_verified", "roles", "internal", "developer", "sso_sub", "sse_sub"});
     http::json(res, 200, JsonValue(obj));
 }
 
@@ -611,6 +611,7 @@ std::map<std::string, JsonValue> userClaimsJson(const User& user) {
     u["sso_sub"] = JsonValue(user.id);
     u["sse_sub"] = user.sseUserId.empty() ? JsonValue() : JsonValue(user.sseUserId);
     u["internal"] = JsonValue(user.isInternal);
+    u["developer"] = JsonValue(user.isDeveloper);
     u["preferred_username"] = JsonValue(user.username);
     u["name"] = JsonValue(user.fullName);
     u["email"] = JsonValue(user.email);
@@ -752,6 +753,64 @@ void oauthUsersList(const Request& req, Response& res) {
     obj["ok"] = JsonValue(true);
     obj["total"] = jsonx::num(static_cast<long long>(items.size()));
     obj["users"] = JsonValue(items);
+    http::ok(res, JsonValue(obj));
+}
+
+// Developer-permission update for first-party platforms: the exact same m2m
+// gate as 无感登录 (internal + m2m_enabled, see m2mAuthorized). Locates the
+// account by user_id / email / sse_user_id (first match wins) and writes
+// users.is_developer; the new value comes back both as `developer` and inside
+// the standard claim set (`user.developer`), which password/verify,
+// session/verify and users/list now surface as well. Omitting is_developer
+// grants the permission ("添加开发者权限"); pass is_developer=false to revoke.
+void oauthDeveloperUpdate(const Request& req, Response& res) {
+    std::string clientId = http::input(req, "client_id");
+    if (!m2mAuthorized(req, res, clientId)) return;
+
+    std::string userId = util::trim(http::input(req, "user_id"));
+    std::string email = util::lower(util::trim(http::input(req, "email")));
+    std::string sseUserId = util::trim(http::input(req, "sse_user_id"));
+    if (userId.empty() && email.empty() && sseUserId.empty()) {
+        oauthError(res, 400, "invalid_request",
+                   "user_id / email / sse_user_id 至少提供一个");
+        return;
+    }
+
+    std::optional<User> target;
+    if (!userId.empty()) target = repo::findUserById(userId);
+    else if (!email.empty()) target = repo::findUserByEmail(email);
+    else if (!sseUserId.empty()) target = repo::findUserBySseId(sseUserId);
+    if (!target) {
+        oauthError(res, 404, "user_not_found", "用户不存在");
+        return;
+    }
+
+    std::string flag = http::input(req, "is_developer");
+    if (flag.empty()) flag = http::input(req, "developer");
+    bool isDeveloper = true;
+    if (!flag.empty()) {
+        std::string value = util::lower(util::trim(flag));
+        if (value == "true" || value == "1") isDeveloper = true;
+        else if (value == "false" || value == "0") isDeveloper = false;
+        else {
+            oauthError(res, 400, "invalid_request", "is_developer 仅接受 true / false");
+            return;
+        }
+    }
+
+    if (!repo::updateUserDeveloper(target->id, isDeveloper)) {
+        applog::error("[oauth] developer/update failed client=" + clientId +
+                      " user=" + target->id);
+        oauthError(res, 500, "update_failed", "开发者权限更新失败");
+        return;
+    }
+    auto refreshed = repo::findUserById(target->id);
+    if (refreshed) *target = *refreshed;
+
+    std::map<std::string, JsonValue> obj;
+    obj["ok"] = JsonValue(true);
+    obj["developer"] = JsonValue(target->isDeveloper);
+    obj["user"] = JsonValue(userClaimsJson(*target));
     http::ok(res, JsonValue(obj));
 }
 

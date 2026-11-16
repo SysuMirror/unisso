@@ -226,6 +226,10 @@ struct User {
     bool isAdmin = false;
     bool isInternal = false;
     bool isSuperAdmin = false;
+    // Developer permission: judged from the `developer` claim surfaced to
+    // first-party platforms (无感登录) and /api/oauth/userinfo. Managed via
+    // POST /api/oauth/developer/update or the admin console.
+    bool isDeveloper = false;
     std::string sseUserId;
     std::string createdAt;
     std::string updatedAt;
@@ -281,6 +285,7 @@ bool loadUserRelations(User& user);
 bool createUser(const User& user);
 bool updateUserPassword(const std::string& userId, const std::string& passwordHash);
 bool updateUserLastLogin(const std::string& userId);
+bool updateUserDeveloper(const std::string& userId, bool isDeveloper);
 
 std::vector<Application> listApplications();
 std::vector<Application> listApplicationsByStatus(const std::string& status);
@@ -463,6 +468,9 @@ void oauthPasswordVerify(const Request& req, Response& res);
 void oauthSessionVerify(const Request& req, Response& res);
 void oauthSessionRevoke(const Request& req, Response& res);
 void oauthUsersList(const Request& req, Response& res);
+// Developer-permission update for first-party platforms (无感登录, m2m-gated):
+// POST /api/oauth/developer/update.
+void oauthDeveloperUpdate(const Request& req, Response& res);
 void oidcDiscovery(const Request& req, Response& res);
 void oidcJwks(const Request& req, Response& res);
 
