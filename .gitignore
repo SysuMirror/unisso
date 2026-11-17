@@ -1,4 +1,6 @@
 backend/build/
+backend/build-next/
+backend/developer-write-clients.local
 backend/web/
 backend/secrets/
 backend/data/

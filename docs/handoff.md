@@ -36,6 +36,8 @@ UNISSO_DEVELOPER_WRITE_CLIENTS='<Join 的实际 client_id>'
 
 空名单拒绝所有应用写资格。历史登录名单 `UNISSO_PASSWORD_VERIFY_CLIENTS` 不授予资格写权限。Develop 若使用 OAuth userinfo，沿用已有 OAuth 应用和 access token，不需要为 userinfo 启用 M2M。
 
+使用仓库的 `deploy.sh` 启动时，也可把逗号分隔的客户端 ID 写入持久目录中的 `backend/developer-write-clients.local`。平台未设置 `UNISSO_DEVELOPER_WRITE_CLIENTS` 时，脚本从该文件加载；平台环境变量优先，包括显式设置的空值。此文件不进 Git。名单复用应用已有的 Client ID，应用继续使用原密钥。
+
 ## 身份如何关联
 
 把 UniSSO 的 `sub` 保存为下游身份关联键；`sso_sub` 与它相同。Join 写资格时，把这个值作为 `user_id`。`sse_sub` 是另一套集市账号 ID，单独保存。

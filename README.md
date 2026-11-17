@@ -68,6 +68,13 @@ cd .. && ./deploy.sh
 `cmake libssl-dev default-libmysqlclient-dev libhiredis-dev zlib1g-dev
 libcurl4-openssl-dev libcrypt-dev libcpp-httplib-dev`。
 
+Pod 使用 `devdebs/` 恢复构建依赖，其中还需包含 CMake 的运行依赖
+`libarchive13t64 librhash0 libjsoncpp25 libxml2 libicu74` 和 pkg-config 的实现
+`pkgconf pkgconf-bin libpkgconf3`。部署脚本会检查 CMake 能否运行及编译器能否找到头文件；
+后端在 `backend/build-next/` 编译成功且动态库可解析后，才替换运行文件。
+资格写入名单可由平台环境变量配置，也可使用持久化的
+`backend/developer-write-clients.local`，详见接入 handoff。
+
 ## 功能边界
 
 **SSO 负责**

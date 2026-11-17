@@ -4,25 +4,41 @@ set -eu
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT/backend"
 # RECOVERY 2026-11-15: runtime libs on persistent disk; pod rebuild needs no apt
- export LD_LIBRARY_PATH=/home/cloud/deploy/unisso/libs/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH:-}
+export LD_LIBRARY_PATH="$ROOT/libs/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH:-}"
+
+# The platform environment takes precedence. Keep Pod-local writer IDs on the
+# persistent disk when the platform does not supply this variable.
+if [ "${UNISSO_DEVELOPER_WRITE_CLIENTS+x}" != x ] \
+   && [ -f "$ROOT/backend/developer-write-clients.local" ]; then
+    UNISSO_DEVELOPER_WRITE_CLIENTS=$(cat "$ROOT/backend/developer-write-clients.local")
+    export UNISSO_DEVELOPER_WRITE_CLIENTS
+fi
+
+build_deps_ready() {
+    cmake --version >/dev/null 2>&1 \
+        && make --version >/dev/null 2>&1 \
+        && printf '%s\n' '#include <mysql.h>' '#include <hiredis/hiredis.h>' \
+             '#include <curl/curl.h>' '#include <httplib.h>' \
+             '#include <openssl/ssl.h>' '#include <zlib.h>' '#include <crypt.h>' \
+           | c++ -std=c++20 -I/usr/include/mysql -E -x c++ - >/dev/null 2>&1
+}
 
 # Build deps: prefer persisted .debs under $ROOT/devdebs (no network / apt).
 ensure_build_deps() {
-    if command -v cmake >/dev/null 2>&1 \
-       && [ -f /usr/include/mysql/mysql.h ] \
-       && [ -f /usr/include/hiredis/hiredis.h ] \
-       && [ -f /usr/include/curl/curl.h ] \
-       && [ -f /usr/include/httplib.h ]; then
+    if build_deps_ready; then
         return 0
     fi
     if [ -d "$ROOT/devdebs" ]; then
         for d in "$ROOT/devdebs"/*.deb; do
             [ -f "$d" ] || continue
-            sudo dpkg-deb -x "$d" / >/dev/null 2>&1 || true
+            if ! sudo -n dpkg-deb -x "$d" / >/dev/null; then
+                echo "[deploy] failed to restore dependency: $d" >&2
+                return 1
+            fi
         done
-        sudo ldconfig >/dev/null 2>&1 || true
+        sudo -n ldconfig >/dev/null 2>&1 || true
     fi
-    command -v cmake >/dev/null 2>&1
+    build_deps_ready
 }
 
 NEED_BUILD=0
@@ -34,8 +50,14 @@ fi
 
 if [ "$NEED_BUILD" = "1" ]; then
     if ensure_build_deps; then
-        mkdir -p build
-        if ! (cd build && cmake .. -DCMAKE_BUILD_TYPE=Release >/dev/null && make -j2); then
+        # Link away from the last good executable; replace it only on success.
+        mkdir -p build-next build
+        if (cd build-next && cmake .. -DCMAKE_BUILD_TYPE=Release >/dev/null && make -j2) \
+           && ldd build-next/unisso_v2 >/dev/null 2>&1 \
+           && ! ldd build-next/unisso_v2 2>&1 | grep -q 'not found'; then
+            cp build-next/unisso_v2 build/unisso_v2.next
+            mv -f build/unisso_v2.next build/unisso_v2
+        else
             echo "[deploy] build failed; keeping existing binary if present" >&2
             [ -x build/unisso_v2 ] || exit 1
         fi
