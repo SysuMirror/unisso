@@ -13,7 +13,7 @@ Join 审批通过后，把用户的开发者资格写入 UniSSO。Develop 在后
 管理员在 UniSSO 运行环境设置：
 
 ```sh
-UNISSO_DEVELOPER_WRITE_CLIENTS=<Join 的实际 client_id>
+UNISSO_DEVELOPER_WRITE_CLIENTS='<Join 的实际 client_id>'
 ```
 
 多个写入方用逗号分隔。空值表示没有应用可写资格。登录权限和资格写入权限分别配置；Develop 只需读取时不加入写入名单。历史 `UNISSO_PASSWORD_VERIFY_CLIENTS` 名单继续用于已有登录接入，但不能授予写资格的能力。
