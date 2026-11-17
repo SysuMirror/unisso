@@ -12,6 +12,7 @@
 #include "JsonValue.h"
 #include "DBConnector.h"
 #include "RDConnector.h"
+#include "StorageUnavailable.h"
 
 // ===========================================================================
 // Configuration (environment first, sensible defaults)
@@ -168,7 +169,7 @@ bool extension(const std::string& contentType, const std::string& data, std::str
 class Db {
 public:
     static bool init();
-    static std::vector<std::map<std::string, std::string>> query(const std::string& sql);
+    static std::vector<std::map<std::string, std::string>> query(const std::string& sql, bool checked = false);
     static int exec(const std::string& sql);
     static long long lastInsertId();
     static std::string esc(const std::string& value);
@@ -182,7 +183,7 @@ class Cache {
 public:
     static bool init();
     static std::string key(const std::string& name);
-    static std::string get(const std::string& name);
+    static std::string get(const std::string& name, bool checked = false);
     static bool set(const std::string& name, const std::string& value, int ttl = 0);
     static bool setnx(const std::string& name, const std::string& value, int ttl);
     static bool del(const std::string& name);
@@ -276,12 +277,12 @@ struct Consent {
 };
 
 namespace repo {
-std::optional<User> findUserByEmail(const std::string& email);
+std::optional<User> findUserByEmail(const std::string& email, bool checked = false);
 std::optional<User> findUserByUsername(const std::string& username);
-std::optional<User> findUserById(const std::string& id);
-std::optional<User> findUserBySseId(const std::string& sseUserId);
+std::optional<User> findUserById(const std::string& id, bool checked = false);
+std::optional<User> findUserBySseId(const std::string& sseUserId, bool checked = false);
 std::vector<User> listUsers();
-bool loadUserRelations(User& user);
+bool loadUserRelations(User& user, bool checked = false);
 bool createUser(const User& user);
 bool updateUserPassword(const std::string& userId, const std::string& passwordHash);
 bool updateUserLastLogin(const std::string& userId);
@@ -289,7 +290,7 @@ bool updateUserDeveloper(const std::string& userId, bool isDeveloper);
 
 std::vector<Application> listApplications();
 std::vector<Application> listApplicationsByStatus(const std::string& status);
-std::optional<Application> findApplicationByClientId(const std::string& clientId);
+std::optional<Application> findApplicationByClientId(const std::string& clientId, bool checked = false);
 std::optional<Application> findApplicationById(const std::string& id);
 std::vector<Application> listApplicationsForUser(const std::string& userId);
 
@@ -299,7 +300,7 @@ bool upsertConsent(const std::string& userId, const std::string& applicationId,
                    const std::vector<std::string>& scopes);
 bool revokeConsent(const std::string& userId, const std::string& applicationId);
 
-std::vector<Identity> listIdentities(const std::string& userId);
+std::vector<Identity> listIdentities(const std::string& userId, bool checked = false);
 bool bindIdentity(const Identity& identity);
 bool unbindIdentity(const std::string& userId, const std::string& identityId);
 
@@ -360,7 +361,7 @@ std::string createId(const std::string& userId, const std::string& clientId,
 std::optional<std::map<std::string, JsonValue>> decode(const std::string& token,
                                                       const std::string& type,
                                                       const std::string& audience = "");
-bool revoked(const std::string& jti, const std::string& type);
+bool revoked(const std::string& jti, const std::string& type, bool checked = false);
 bool issue(const User& user, const Application& app,
            const std::vector<std::string>& grantedScopes,
            bool includeIdToken, const std::string& nonce,

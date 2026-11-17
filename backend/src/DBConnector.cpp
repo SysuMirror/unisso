@@ -12,6 +12,7 @@
 // Created by HP on 2025/12/9.
 //
 #include "../include/DBConnector.h"
+#include "StorageUnavailable.h"
 #include <stdexcept>
 #include <iostream>
 #include <cstring>
@@ -130,12 +131,16 @@ bool DBConnector::connect() {
  * @warning 查询失败时会设置错误信息，可通过getError()获取
  * @warning Error information is set on query failure, can be obtained via getError()
  */
-std::vector<std::map<std::string, std::string>> DBConnector::query(const std::string& sql) {
+std::vector<std::map<std::string, std::string>> DBConnector::query(const std::string& sql, bool checked) {
     std::lock_guard<std::mutex> lock(queryMutex_);
     std::vector<std::map<std::string, std::string>> result;
-    if (!ensureConnected()) return result;
+    if (!ensureConnected()) {
+        if (checked) throw StorageUnavailable();
+        return result;
+    }
     if (db_ == nullptr) {
         last_error_ = "未连接数据库";
+        if (checked) throw StorageUnavailable();
         return result;
     }
 
@@ -143,6 +148,7 @@ std::vector<std::map<std::string, std::string>> DBConnector::query(const std::st
     // Execute SQL
     if (mysql_query(db_, sql.c_str()) != 0) {
         last_error_ = std::string("SQL执行失败: ") + mysql_error(db_);
+        if (checked) throw StorageUnavailable();
         return result;
     }
 
@@ -151,6 +157,7 @@ std::vector<std::map<std::string, std::string>> DBConnector::query(const std::st
     MYSQL_RES* res = mysql_store_result(db_);
     if (res == nullptr) {
         last_error_ = std::string("获取结果集失败: ") + mysql_error(db_);
+        if (checked) throw StorageUnavailable();
         return result;
     }
 
@@ -161,6 +168,7 @@ std::vector<std::map<std::string, std::string>> DBConnector::query(const std::st
     if (fields == nullptr || field_count <= 0) {
         freeResult(res);
         last_error_ = "无字段信息";
+        if (checked) throw StorageUnavailable();
         return result;
     }
 
@@ -179,9 +187,15 @@ std::vector<std::map<std::string, std::string>> DBConnector::query(const std::st
         result.push_back(std::move(row_map));
     }
 
+    const bool fetchFailed = mysql_errno(db_) != 0;
     // 释放资源
     // Release resources
     freeResult(res);
+    if (fetchFailed) {
+        last_error_ = "读取结果集失败";
+        if (checked) throw StorageUnavailable();
+        return {};
+    }
     last_error_.clear();
     return result;
 }

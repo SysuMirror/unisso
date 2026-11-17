@@ -2,6 +2,19 @@
 
 namespace handlers {
 
+namespace {
+auto storageAware(void (*handler)(const Request&, Response&)) {
+    return [handler](const Request& req, Response& res) {
+        try {
+            handler(req, res);
+        } catch (const StorageUnavailable&) {
+            http::error(res, 503, "temporarily_unavailable", "身份服务暂时不可用，请稍后重试");
+            res.headers["Retry-After"] = "3";
+        }
+    };
+}
+}  // namespace
+
 void registerAll(Server& app) {
     // Health
     app.get("/api/health", handlers::health);
@@ -43,13 +56,13 @@ void registerAll(Server& app) {
     app.get("/api/oauth/authorize/context", handlers::oauthContext);
     app.post("/api/oauth/authorize", handlers::oauthAuthorize);
     app.post("/api/oauth/token", handlers::oauthToken);
-    app.post("/api/oauth/password/verify", handlers::oauthPasswordVerify);
-    app.post("/api/oauth/session/verify", handlers::oauthSessionVerify);
-    app.post("/api/oauth/session/revoke", handlers::oauthSessionRevoke);
-    app.post("/api/oauth/users/list", handlers::oauthUsersList);
-    app.post("/api/oauth/developer/update", handlers::oauthDeveloperUpdate);
+    app.post("/api/oauth/password/verify", storageAware(handlers::oauthPasswordVerify));
+    app.post("/api/oauth/session/verify", storageAware(handlers::oauthSessionVerify));
+    app.post("/api/oauth/session/revoke", storageAware(handlers::oauthSessionRevoke));
+    app.post("/api/oauth/users/list", storageAware(handlers::oauthUsersList));
+    app.post("/api/oauth/developer/update", storageAware(handlers::oauthDeveloperUpdate));
     app.post("/api/oauth/introspect", handlers::oauthIntrospect);
-    app.get("/api/oauth/userinfo", handlers::oauthUserinfo);
+    app.get("/api/oauth/userinfo", storageAware(handlers::oauthUserinfo));
     app.get("/.well-known/openid-configuration", handlers::oidcDiscovery);
     app.get("/.well-known/jwks.json", handlers::oidcJwks);
 

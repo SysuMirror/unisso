@@ -5,6 +5,7 @@
 // Implements Redis connection management and basic data operation functions
 
 #include "../include/RDConnector.h"
+#include "StorageUnavailable.h"
 
 // 初始化静态单例实例指针
 // Initialize static singleton instance pointer
@@ -35,6 +36,15 @@ RdConnector* RdConnector::instance_ = nullptr;
  * 7. Set instance_ pointer if it's the first instance
  */
 bool RdConnector::connect() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return connectUnlocked();
+}
+
+bool RdConnector::ensureConnected() {
+    return (context && !context->err) || connectUnlocked();
+}
+
+bool RdConnector::connectUnlocked() {
     // 检查是否已经存在其他RdConnector实例
     // Check if another RdConnector instance already exists
     if (instance_ != nullptr && instance_ != this) {
@@ -59,9 +69,15 @@ bool RdConnector::connect() {
     }
     // 尝试连接到Redis服务器
     // Try to connect to Redis server
-    context = redisConnect(host_.c_str(), port);
+    const timeval timeout{2, 0};
+    context = redisConnectWithTimeout(host_.c_str(), port, timeout);
     if (context == nullptr || context->err) {
         std::cerr << "连接失败：" << (context ? context->errstr : "内存分配失败") << std::endl;
+        return false;
+    }
+    if (redisSetTimeout(context, timeout) != REDIS_OK) {
+        redisFree(context);
+        context = nullptr;
         return false;
     }
     // 如果配置了密码，进行身份验证
@@ -109,12 +125,13 @@ bool RdConnector::connect() {
  * @return 返回键对应的值，如果键不存在或发生错误则返回空字符串
  * Returns the value corresponding to the key, empty string if key does not exist or error occurs
  */
-std::string RdConnector::get(const std::string& key) {
+std::string RdConnector::get(const std::string& key, bool checked) {
     std::lock_guard<std::mutex> lock(mutex_);
     // 检查Redis连接上下文是否有效
     // Check if Redis connection context is valid
-    if (context == nullptr){
+    if (!ensureConnected()){
         std::cerr<<"未连接"<<std::endl;
+        if (checked) throw StorageUnavailable();
         return "";
     }
     // 执行Redis GET命令获取键值
@@ -125,19 +142,22 @@ std::string RdConnector::get(const std::string& key) {
     if (reply == nullptr || reply->type == REDIS_REPLY_ERROR) {
         std::cerr << "获取失败：" << (reply ? reply->str : context->errstr) << std::endl;
         freeReplyObject(reply);
+        if (checked) throw StorageUnavailable();
         return "";
     }
     std::string result;
     // 根据返回类型处理结果
     // Process result according to return type
     if (reply->type == REDIS_REPLY_STRING) {
-        result = reply->str;  // 键存在，返回值
+        result.assign(reply->str, reply->len);
     } else if (reply->type == REDIS_REPLY_NIL) {
         result = "";  // 键不存在，返回空
     } else {
         // 处理其他异常情况
         std::cerr << "GET 命令返回异常（类型：" << reply->type << "）" << std::endl;
-        result = "";
+        freeReplyObject(reply);
+        if (checked) throw StorageUnavailable();
+        return "";
     }
     // 释放Redis回复对象
     // Free Redis reply object
@@ -162,7 +182,7 @@ bool RdConnector::set(const std::string& key, const std::string& value) {
     std::lock_guard<std::mutex> lock(mutex_);
     // 检查Redis上下文是否初始化，即是否已连接到Redis服务器
     // Check if Redis context is initialized, i.e., whether connected to Redis server
-    if (context == nullptr){
+    if (!ensureConnected()){
         std::cerr<<"未连接"<<std::endl;
         return false;
     }
@@ -208,7 +228,7 @@ bool RdConnector::set(const std::string& key, const std::string& value, int expi
     std::lock_guard<std::mutex> lock(mutex_);
     // 检查Redis上下文是否初始化，即是否已连接到Redis服务器
     // Check if Redis context is initialized, i.e., whether connected to Redis server
-    if (context == nullptr){
+    if (!ensureConnected()){
         std::cerr<<"未连接"<<std::endl;
         return false;
     }
@@ -319,7 +339,7 @@ bool RdConnector::del(const std::string& key) {
     std::lock_guard<std::mutex> lock(mutex_);
     // 检查Redis连接是否有效
     // Check if Redis connection is valid
-    if (context == nullptr) {
+    if (!ensureConnected()) {
         std::cerr << "未连接Redis服务器" << std::endl;
         return false;
     }
@@ -362,7 +382,7 @@ std::string RdConnector::getdel(const std::string& key) {
 
 long long RdConnector::incr(const std::string& key) {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (!context) return -1;
+    if (!ensureConnected()) return -1;
     auto* reply = (redisReply*)redisCommand(context, "INCR %s", key.c_str());
     if (!reply) return -1;
     long long value = (reply->type == REDIS_REPLY_INTEGER) ? reply->integer : -1;
@@ -383,7 +403,7 @@ bool RdConnector::setnx(const std::string& key, const std::string& value, int ex
 
 bool RdConnector::expire(const std::string& key, int seconds) {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (!context) return false;
+    if (!ensureConnected()) return false;
     auto* reply = (redisReply*)redisCommand(context, "EXPIRE %s %d", key.c_str(), seconds);
     if (!reply) return false;
     bool ok = reply->type == REDIS_REPLY_INTEGER && reply->integer == 1;

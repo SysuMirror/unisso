@@ -1,0 +1,428 @@
+{
+  "binary": "/home/a1784/.cache/unisso-qualification-20261117/build-baseline/unisso_v2",
+  "baseline": false,
+  "completed": true,
+  "work_directory": "/var/tmp/unisso-qualification-oszruhuh",
+  "results": [
+    {
+      "name": "login without qualification",
+      "passed": true,
+      "status": 200,
+      "error": null,
+      "developer": false
+    },
+    {
+      "name": "Develop reads unqualified identity",
+      "passed": true,
+      "status": 200,
+      "error": null,
+      "developer": false
+    },
+    {
+      "name": "simulated Develop denies protected business",
+      "passed": true,
+      "status": 403,
+      "error": "developer_required",
+      "developer": null
+    },
+    {
+      "name": "userinfo reads initial qualification",
+      "passed": true,
+      "status": 200,
+      "error": null,
+      "developer": false
+    },
+    {
+      "name": "Join grants qualification",
+      "passed": true,
+      "status": 200,
+      "error": null,
+      "developer": true
+    },
+    {
+      "name": "existing Develop session sees grant",
+      "passed": true,
+      "status": 200,
+      "error": null,
+      "developer": true
+    },
+    {
+      "name": "simulated Develop allows protected business",
+      "passed": true,
+      "status": 200,
+      "error": null,
+      "developer": null
+    },
+    {
+      "name": "same access token sees grant",
+      "passed": true,
+      "status": 200,
+      "error": null,
+      "developer": true
+    },
+    {
+      "name": "duplicate grant",
+      "passed": true,
+      "status": 200,
+      "error": null,
+      "developer": true
+    },
+    {
+      "name": "Join revokes qualification",
+      "passed": true,
+      "status": 200,
+      "error": null,
+      "developer": false
+    },
+    {
+      "name": "existing Develop session sees revocation",
+      "passed": true,
+      "status": 200,
+      "error": null,
+      "developer": false
+    },
+    {
+      "name": "simulated Develop denies after revocation",
+      "passed": true,
+      "status": 403,
+      "error": "developer_required",
+      "developer": null
+    },
+    {
+      "name": "same access token sees revocation",
+      "passed": true,
+      "status": 200,
+      "error": null,
+      "developer": false
+    },
+    {
+      "name": "Develop cannot write",
+      "passed": true,
+      "status": 403,
+      "error": "developer_update_forbidden",
+      "developer": null
+    },
+    {
+      "name": "Basic client authentication",
+      "passed": true,
+      "status": 200,
+      "error": null,
+      "developer": false
+    },
+    {
+      "name": "wrong secret",
+      "passed": true,
+      "status": 401,
+      "error": "invalid_client",
+      "developer": null
+    },
+    {
+      "name": "public client cannot use M2M",
+      "passed": true,
+      "status": 401,
+      "error": "invalid_client",
+      "developer": null
+    },
+    {
+      "name": "external-test cannot write",
+      "passed": true,
+      "status": 403,
+      "error": "developer_update_forbidden",
+      "developer": null
+    },
+    {
+      "name": "no-m2m-test cannot write",
+      "passed": true,
+      "status": 403,
+      "error": "developer_update_forbidden",
+      "developer": null
+    },
+    {
+      "name": "pending-test cannot write",
+      "passed": true,
+      "status": 403,
+      "error": "developer_update_forbidden",
+      "developer": null
+    },
+    {
+      "name": "disabled client",
+      "passed": true,
+      "status": 401,
+      "error": "invalid_client",
+      "developer": null
+    },
+    {
+      "name": "unknown client",
+      "passed": true,
+      "status": 401,
+      "error": "invalid_client",
+      "developer": null
+    },
+    {
+      "name": "unknown user",
+      "passed": true,
+      "status": 404,
+      "error": "user_not_found",
+      "developer": null
+    },
+    {
+      "name": "missing target",
+      "passed": true,
+      "status": 400,
+      "error": "invalid_request",
+      "developer": null
+    },
+    {
+      "name": "missing flag",
+      "passed": true,
+      "status": 400,
+      "error": "invalid_request",
+      "developer": null
+    },
+    {
+      "name": "invalid flag",
+      "passed": true,
+      "status": 400,
+      "error": "invalid_request",
+      "developer": null
+    },
+    {
+      "name": "missing credentials",
+      "passed": true,
+      "status": 401,
+      "error": "invalid_client",
+      "developer": null
+    },
+    {
+      "name": "missing login password",
+      "passed": true,
+      "status": 400,
+      "error": "invalid_request",
+      "developer": null
+    },
+    {
+      "name": "unknown login account",
+      "passed": true,
+      "status": 401,
+      "error": "invalid_credentials",
+      "developer": null
+    },
+    {
+      "name": "missing session",
+      "passed": true,
+      "status": 400,
+      "error": "invalid_request",
+      "developer": null
+    },
+    {
+      "name": "unknown session",
+      "passed": true,
+      "status": 401,
+      "error": "invalid_session",
+      "developer": null
+    },
+    {
+      "name": "email target and legacy flag",
+      "passed": true,
+      "status": 200,
+      "error": null,
+      "developer": true
+    },
+    {
+      "name": "market ID target",
+      "passed": true,
+      "status": 200,
+      "error": null,
+      "developer": false
+    },
+    {
+      "name": "SQL write failure",
+      "passed": true,
+      "status": 503,
+      "error": "temporarily_unavailable",
+      "developer": null
+    },
+    {
+      "name": "write recovers",
+      "passed": true,
+      "status": 200,
+      "error": null,
+      "developer": true
+    },
+    {
+      "name": "write commits but confirming read fails",
+      "passed": true,
+      "status": 503,
+      "error": "temporarily_unavailable",
+      "developer": null
+    },
+    {
+      "name": "retry after confirming read recovers",
+      "passed": true,
+      "status": 200,
+      "error": null,
+      "developer": true
+    },
+    {
+      "name": "session write failure during login",
+      "passed": true,
+      "status": 503,
+      "error": "temporarily_unavailable",
+      "developer": null
+    },
+    {
+      "name": "session extension write failure",
+      "passed": true,
+      "status": 503,
+      "error": "temporarily_unavailable",
+      "developer": null
+    },
+    {
+      "name": "same session survives write failure",
+      "passed": true,
+      "status": 200,
+      "error": null,
+      "developer": true
+    },
+    {
+      "name": "session revoke failure",
+      "passed": true,
+      "status": 503,
+      "error": "temporarily_unavailable",
+      "developer": null
+    },
+    {
+      "name": "failed revoke preserves session",
+      "passed": true,
+      "status": 200,
+      "error": null,
+      "developer": true
+    },
+    {
+      "name": "SQL down update",
+      "passed": true,
+      "status": 503,
+      "error": "temporarily_unavailable",
+      "developer": null
+    },
+    {
+      "name": "SQL down session",
+      "passed": true,
+      "status": 503,
+      "error": "temporarily_unavailable",
+      "developer": null
+    },
+    {
+      "name": "SQL down login",
+      "passed": true,
+      "status": 503,
+      "error": "temporarily_unavailable",
+      "developer": null
+    },
+    {
+      "name": "SQL down userinfo",
+      "passed": true,
+      "status": 503,
+      "error": "temporarily_unavailable",
+      "developer": null
+    },
+    {
+      "name": "SQL recovers with same session",
+      "passed": true,
+      "status": 200,
+      "error": null,
+      "developer": true
+    },
+    {
+      "name": "SQL recovers with same token",
+      "passed": true,
+      "status": 200,
+      "error": null,
+      "developer": true
+    },
+    {
+      "name": "Redis down session",
+      "passed": true,
+      "status": 503,
+      "error": "temporarily_unavailable",
+      "developer": null
+    },
+    {
+      "name": "Redis down login",
+      "passed": true,
+      "status": 503,
+      "error": "temporarily_unavailable",
+      "developer": null
+    },
+    {
+      "name": "Redis down revoke",
+      "passed": true,
+      "status": 503,
+      "error": "temporarily_unavailable",
+      "developer": null
+    },
+    {
+      "name": "qualification write independent of Redis",
+      "passed": true,
+      "status": 200,
+      "error": null,
+      "developer": false
+    },
+    {
+      "name": "lost Redis session is invalid",
+      "passed": true,
+      "status": 401,
+      "error": "invalid_session",
+      "developer": null
+    },
+    {
+      "name": "Redis recovers without backend restart",
+      "passed": true,
+      "status": 200,
+      "error": null,
+      "developer": false
+    },
+    {
+      "name": "new session works",
+      "passed": true,
+      "status": 200,
+      "error": null,
+      "developer": false
+    },
+    {
+      "name": "revoke session",
+      "passed": true,
+      "status": 200,
+      "error": null,
+      "developer": null
+    },
+    {
+      "name": "revoked session invalid",
+      "passed": true,
+      "status": 401,
+      "error": "invalid_session",
+      "developer": null
+    },
+    {
+      "name": "revoke is idempotent",
+      "passed": true,
+      "status": 200,
+      "error": null,
+      "developer": null
+    },
+    {
+      "name": "empty writer list denies by default",
+      "passed": true,
+      "status": 403,
+      "error": "developer_update_forbidden",
+      "developer": null
+    },
+    {
+      "name": "empty writer list preserves login",
+      "passed": true,
+      "status": 200,
+      "error": null,
+      "developer": false
+    }
+  ]
+}
