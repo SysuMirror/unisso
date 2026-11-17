@@ -8,6 +8,9 @@ info:
     POST 支持 HTTP Basic；也可在 JSON 请求体传 client_id/client_secret。
     POST security 中的空对象表示请求体认证这个替代方式，服务端仍要求有效客户端凭据。
     本文件采用 JSON 请求格式；实现还兼容表单输入。
+externalDocs:
+  description: Join / Develop 接入 handoff
+  url: ../handoff.md
 servers:
   - url: '{baseUrl}'
     description: 替换为管理员提供的实际联调环境地址
@@ -23,6 +26,9 @@ paths:
       operationId: updateDeveloperQualification
       tags: [Join]
       summary: 设置开发者资格
+      externalDocs:
+        description: 参数、响应、错误与重试
+        url: developer-update.md
       description: |
         需要内部、approved、启用 M2M 的机密客户端及有效密钥，并在
         UNISSO_DEVELOPER_WRITE_CLIENTS 名单中。按 user_id/email/sse_user_id
@@ -77,6 +83,9 @@ paths:
       operationId: verifyPassword
       tags: [Develop]
       summary: 验证用户密码并创建 SSO 会话
+      externalDocs:
+        description: 参数、响应、限流与会话保存
+        url: password-verify.md
       description: |
         需要有效的机密客户端，通常配置为 internal + m2m_enabled；
         历史 UNISSO_PASSWORD_VERIFY_CLIENTS 名单仍可赋予此内部接入能力。
@@ -120,6 +129,9 @@ paths:
       operationId: verifySession
       tags: [Develop]
       summary: 验证 SSO 会话，读取最新身份并续期
+      externalDocs:
+        description: 参数、响应、资格判断与续期
+        url: session-verify.md
       description: |
         客户端权限同 password/verify。成功时重新读取用户 developer，并延长会话有效期。
         无资格用户仍返回 200 + user.developer=false，业务访问由下游决定。
@@ -149,6 +161,9 @@ paths:
       operationId: revokeSession
       tags: [Develop]
       summary: 删除指定 SSO 会话
+      externalDocs:
+        description: 参数、响应、退出范围与重试
+        url: session-revoke.md
       description: |
         客户端权限同 password/verify。会话不存在也返回成功；删除失败返回 503。
         所有使用该会话的应用随后验证失败。其他 SSO 会话和 OAuth token 不受此操作影响。
@@ -181,6 +196,9 @@ paths:
       operationId: getUserinfo
       tags: [Develop]
       summary: 用 access token 读取最新身份和资格
+      externalDocs:
+        description: 鉴权、身份字段、错误与资格生效
+        url: userinfo.md
       description: |
         使用既有 OAuth 流程取得的 access token，无需 M2M 客户端凭据。
         每次请求检查签名、有效期、撤销记录及用户状态，并读取最新 developer。

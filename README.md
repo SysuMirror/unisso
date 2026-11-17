@@ -11,9 +11,12 @@
 
 ## Join / Develop 接入
 
-- [接入指南](docs/integration/join-develop.md)：Join 写资格、Develop 读取与判断、登录与退出、错误和重试。
-- [OpenAPI 3.1](docs/api/qualification.openapi.yaml)：本次链路的 5 个接口。
-- [验证记录](backend/tests/qualification/RESULTS.md)：60 项本地隔离检查通过；实际部署状态以发布记录为准。
+- [接入 handoff](docs/handoff.md)：分工、环境准备、接口选择和联调顺序。
+- [设置开发者资格](docs/api/developer-update.md)：Join 授予、撤销资格。
+- [内部登录](docs/api/password-verify.md)、[会话验证](docs/api/session-verify.md)、[会话注销](docs/api/session-revoke.md)：内部应用使用 SSO 会话。
+- [OAuth userinfo](docs/api/userinfo.md)：已有 OAuth 登录的应用读取当前身份与资格。
+- [OpenAPI 3.1](docs/api/qualification.openapi.yaml)：五个接口的结构化定义。
+- [验证记录](backend/tests/qualification/RESULTS.md)：本地隔离检查范围与复跑方式。
 
 ## 公网地址
 
