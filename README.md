@@ -1,13 +1,19 @@
 # UniSSO v2 — Vue 3 + C++
 
-统一身份认证（SSO）：只负责**身份认证与 OAuth2/OIDC 身份断言**，不做业务权限、
-用户组或应用内授权。应用自己的角色、用户组、资源权限由应用管理。
+统一身份认证（SSO）：负责**身份认证、OAuth2/OIDC 身份断言和全局开发者资格**。
+应用自己的角色、项目成员、用户组和资源权限由应用管理。
 
 - 前端：Vue 3 + Vite（`frontend/`），构建到 `backend/web/`
 - 后端：C++20，HTTP 传输使用发行版 `cpp-httplib`（原先 vendored 框架的传输层
   在并发下会卡死，已替换；业务/路由/JSON/DB/Redis 代码保留）
 - 存储：MySQL 8 + Redis ACL + 本地文件（头像/图标）
 - 协议：OAuth2 Authorization Code + PKCE(S256)、OIDC discovery/JWKS、RS256
+
+## Join / Develop 接入
+
+- [接入指南](docs/integration/join-develop.md)：Join 写资格、Develop 读取与判断、登录与退出、错误和重试。
+- [OpenAPI 3.1](docs/api/qualification.openapi.yaml)：本次链路的 5 个接口。
+- [验证记录](backend/tests/qualification/RESULTS.md)：60 项本地隔离检查通过；实际部署状态以发布记录为准。
 
 ## 公网地址
 
