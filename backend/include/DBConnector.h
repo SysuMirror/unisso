@@ -87,7 +87,8 @@ public:
      * @param sql SQL查询语句
      * @return 查询结果集
      */
-    std::vector<std::map<std::string, std::string>> query(const std::string& sql);
+    // checked=true distinguishes a failed query from a successful empty result.
+    std::vector<std::map<std::string, std::string>> query(const std::string& sql, bool checked = false);
 
     /**
      * @brief 执行SQL命令（适合INSERT/UPDATE/DELETE，返回影响行数）

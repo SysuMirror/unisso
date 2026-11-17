@@ -112,12 +112,12 @@ Identity mapIdentity(const std::map<std::string, std::string>& row) {
 
 namespace repo {
 
-std::optional<User> findUserByEmail(const std::string& email) {
+std::optional<User> findUserByEmail(const std::string& email, bool checked) {
     auto rows = Db::query("SELECT * FROM users WHERE email=" + Db::quote(util::lower(util::trim(email))) +
-                          " LIMIT 1");
+                          " LIMIT 1", checked);
     if (rows.empty()) return std::nullopt;
     User user = mapUser(rows.front());
-    loadUserRelations(user);
+    loadUserRelations(user, checked);
     return user;
 }
 
@@ -133,20 +133,20 @@ std::optional<User> findUserByUsername(const std::string& username) {
     return user;
 }
 
-std::optional<User> findUserById(const std::string& id) {
-    auto rows = Db::query("SELECT * FROM users WHERE id=" + Db::quote(id) + " LIMIT 1");
+std::optional<User> findUserById(const std::string& id, bool checked) {
+    auto rows = Db::query("SELECT * FROM users WHERE id=" + Db::quote(id) + " LIMIT 1", checked);
     if (rows.empty()) return std::nullopt;
     User user = mapUser(rows.front());
-    loadUserRelations(user);
+    loadUserRelations(user, checked);
     return user;
 }
 
-std::optional<User> findUserBySseId(const std::string& sseUserId) {
+std::optional<User> findUserBySseId(const std::string& sseUserId, bool checked) {
     if (sseUserId.empty()) return std::nullopt;
-    auto rows = Db::query("SELECT * FROM users WHERE sse_user_id=" + Db::quote(sseUserId) + " LIMIT 1");
+    auto rows = Db::query("SELECT * FROM users WHERE sse_user_id=" + Db::quote(sseUserId) + " LIMIT 1", checked);
     if (rows.empty()) return std::nullopt;
     User user = mapUser(rows.front());
-    loadUserRelations(user);
+    loadUserRelations(user, checked);
     return user;
 }
 
@@ -162,8 +162,8 @@ std::vector<User> listUsers() {
     return users;
 }
 
-bool loadUserRelations(User& user) {
-    user.identities = listIdentities(user.id);
+bool loadUserRelations(User& user, bool checked) {
+    user.identities = listIdentities(user.id, checked);
     return true;
 }
 
@@ -217,8 +217,8 @@ std::vector<Application> listApplicationsByStatus(const std::string& status) {
     return out;
 }
 
-std::optional<Application> findApplicationByClientId(const std::string& clientId) {
-    auto rows = Db::query("SELECT * FROM applications WHERE client_id=" + Db::quote(clientId) + " LIMIT 1");
+std::optional<Application> findApplicationByClientId(const std::string& clientId, bool checked) {
+    auto rows = Db::query("SELECT * FROM applications WHERE client_id=" + Db::quote(clientId) + " LIMIT 1", checked);
     if (rows.empty()) return std::nullopt;
     return mapApplication(rows.front());
 }
@@ -311,9 +311,9 @@ bool revokeConsent(const std::string& userId, const std::string& applicationId) 
     return true;
 }
 
-std::vector<Identity> listIdentities(const std::string& userId) {
+std::vector<Identity> listIdentities(const std::string& userId, bool checked) {
     auto rows = Db::query("SELECT * FROM user_identities WHERE user_id=" + Db::quote(userId) +
-                          " AND is_active=1 ORDER BY created_at DESC");
+                          " AND is_active=1 ORDER BY created_at DESC", checked);
     std::vector<Identity> out;
     for (const auto& row : rows) out.push_back(mapIdentity(row));
     return out;
@@ -654,9 +654,9 @@ std::optional<std::map<std::string, JsonValue>> decode(const std::string& token,
     return payload;
 }
 
-bool revoked(const std::string& jti, const std::string& type) {
+bool revoked(const std::string& jti, const std::string& type, bool checked) {
     std::string table = (type == "refresh") ? "refresh_tokens" : "access_tokens";
-    auto rows = Db::query("SELECT revoked FROM " + table + " WHERE token=" + Db::quote(jti) + " LIMIT 1");
+    auto rows = Db::query("SELECT revoked FROM " + table + " WHERE token=" + Db::quote(jti) + " LIMIT 1", checked);
     if (rows.empty()) return true;
     auto it = rows.front().find("revoked");
     if (it == rows.front().end()) return true;

@@ -30,6 +30,8 @@ class RdConnector {
     redisContext* context;     ///< Redis连接上下文 Redis connection context
 
     static RdConnector* instance_;  ///< 单例实例 Singleton instance
+    bool connectUnlocked();
+    bool ensureConnected();  // Caller holds mutex_; never retries a sent command.
 public:
     /**
      * @brief 构造函数
@@ -73,7 +75,7 @@ public:
      * @return 键对应的值，若键不存在或发生错误则返回空字符串
      * The value corresponding to the key, empty string if key does not exist or error occurs
      */
-    std::string get(const std::string& key) ;
+    std::string get(const std::string& key, bool checked = false);
 
     /**
      * @brief 设置键值对

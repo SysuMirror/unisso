@@ -509,12 +509,12 @@ void oauthUserinfo(const Request& req, Response& res) {
         oauthError(res, 401, "invalid_token");
         return;
     }
-    if (tokens::revoked(jsonx::getString(*payload, "jti"), "access")) {
+    if (tokens::revoked(jsonx::getString(*payload, "jti"), "access", true)) {
         res.headers["WWW-Authenticate"] = "Bearer error=\"invalid_token\"";
         oauthError(res, 401, "invalid_token");
         return;
     }
-    auto user = repo::findUserById(jsonx::getString(*payload, "sub"));
+    auto user = repo::findUserById(jsonx::getString(*payload, "sub"), true);
     if (!user || !user->isActive) {
         oauthError(res, 401, "invalid_token");
         return;
@@ -556,14 +556,15 @@ void oidcJwks(const Request&, Response& res) {
 
 namespace {
 
-bool m2mAuthorized(const Request& req, Response& res, std::string& clientId) {
+bool m2mAuthorized(const Request& req, Response& res, std::string& clientId,
+                   bool developerWrite = false) {
     std::string clientSecret = http::input(req, "client_secret");
     auto basic = basicCredentials(req);
     if (clientId.empty()) clientId = basic.first;
     if (clientSecret.empty()) clientSecret = basic.second;
-    auto app = repo::findApplicationByClientId(clientId);
+    auto app = repo::findApplicationByClientId(clientId, true);
     std::string clientError;
-    if (!app || !verifyClient(*app, clientSecret, clientError)) {
+    if (!app || !app->isConfidential || !verifyClient(*app, clientSecret, clientError)) {
         oauthError(res, 401, "invalid_client");
         return false;
     }
@@ -572,6 +573,16 @@ bool m2mAuthorized(const Request& req, Response& res, std::string& clientId) {
     // deployments keep working until every client has been switched over in
     // the database.
     bool allowed = app->kind == "internal" && app->m2mEnabled;
+    if (developerWrite) {
+        const auto writers = util::split(util::env("UNISSO_DEVELOPER_WRITE_CLIENTS", ""), ',');
+        const bool listed = std::any_of(writers.begin(), writers.end(),
+            [&](const auto& value) { return util::trim(value) == clientId; });
+        if (!allowed || app->status != "approved" || !listed) {
+            oauthError(res, 403, "developer_update_forbidden");
+            return false;
+        }
+        return true;
+    }
     std::string allowRaw = util::env("UNISSO_PASSWORD_VERIFY_CLIENTS", "");
     if (!allowed && !allowRaw.empty()) {
         std::stringstream stream(allowRaw);
@@ -645,12 +656,13 @@ void oauthPasswordVerify(const Request& req, Response& res) {
     std::string ip = http::clientIp(req);
     std::string key = "pwverify_attempts:" + ip + ":" + email;
     long long attempts = Cache::incr(key, 900);
+    if (attempts < 0) throw StorageUnavailable();
     if (attempts > 5) {
         oauthError(res, 429, "too_many_attempts", "尝试次数过多，请稍后再试");
         return;
     }
 
-    auto user = repo::findUserByEmail(email);
+    auto user = repo::findUserByEmail(email, true);
     if (!user || user->passwordHash.empty() ||
         !password::verify(password, user->passwordHash) || !user->isActive) {
         oauthError(res, 401, "invalid_credentials", "邮箱或密码错误");
@@ -677,7 +689,7 @@ void oauthSessionVerify(const Request& req, Response& res) {
         oauthError(res, 400, "invalid_request", "missing session");
         return;
     }
-    std::string raw = Cache::get("session:" + sid);
+    std::string raw = Cache::get("session:" + sid, true);
     if (raw.empty()) {
         oauthError(res, 401, "invalid_session");
         return;
@@ -698,7 +710,7 @@ void oauthSessionVerify(const Request& req, Response& res) {
         oauthError(res, 401, "invalid_session");
         return;
     }
-    auto user = repo::findUserById(userId);
+    auto user = repo::findUserById(userId, true);
     if (!user || !user->isActive) {
         oauthError(res, 401, "invalid_session");
         return;
@@ -709,7 +721,9 @@ void oauthSessionVerify(const Request& req, Response& res) {
     long long nextExpiry = now + static_cast<long long>(hours) * 3600;
     data["last_seen_at"] = jsonx::num(now);
     data["expires_at"] = jsonx::num(nextExpiry);
-    Cache::setJson("session:" + sid, jsonx::dump(data), hours * 3600);
+    if (!Cache::setJson("session:" + sid, jsonx::dump(data), hours * 3600)) {
+        throw StorageUnavailable();
+    }
 
     std::map<std::string, JsonValue> obj;
     obj["ok"] = JsonValue(true);
@@ -727,7 +741,7 @@ void oauthSessionRevoke(const Request& req, Response& res) {
         oauthError(res, 400, "invalid_request", "missing session");
         return;
     }
-    Cache::del("session:" + sid);
+    if (!Cache::del("session:" + sid)) throw StorageUnavailable();
     std::map<std::string, JsonValue> obj;
     obj["ok"] = JsonValue(true);
     http::ok(res, JsonValue(obj));
@@ -756,16 +770,11 @@ void oauthUsersList(const Request& req, Response& res) {
     http::ok(res, JsonValue(obj));
 }
 
-// Developer-permission update for first-party platforms: the exact same m2m
-// gate as 无感登录 (internal + m2m_enabled, see m2mAuthorized). Locates the
-// account by user_id / email / sse_user_id (first match wins) and writes
-// users.is_developer; the new value comes back both as `developer` and inside
-// the standard claim set (`user.developer`), which password/verify,
-// session/verify and users/list now surface as well. Omitting is_developer
-// grants the permission ("添加开发者权限"); pass is_developer=false to revoke.
+// Qualified internal clients also need UNISSO_DEVELOPER_WRITE_CLIENTS.
+// The caller explicitly supplies the desired state; repeated writes are safe.
 void oauthDeveloperUpdate(const Request& req, Response& res) {
     std::string clientId = http::input(req, "client_id");
-    if (!m2mAuthorized(req, res, clientId)) return;
+    if (!m2mAuthorized(req, res, clientId, true)) return;
 
     std::string userId = util::trim(http::input(req, "user_id"));
     std::string email = util::lower(util::trim(http::input(req, "email")));
@@ -776,36 +785,37 @@ void oauthDeveloperUpdate(const Request& req, Response& res) {
         return;
     }
 
+    std::string flag = http::input(req, "is_developer");
+    if (flag.empty()) flag = http::input(req, "developer");
+    bool isDeveloper;
+    std::string value = util::lower(util::trim(flag));
+    if (value == "true" || value == "1") isDeveloper = true;
+    else if (value == "false" || value == "0") isDeveloper = false;
+    else {
+        oauthError(res, 400, "invalid_request", "请显式提供 is_developer: true / false");
+        return;
+    }
+
     std::optional<User> target;
-    if (!userId.empty()) target = repo::findUserById(userId);
-    else if (!email.empty()) target = repo::findUserByEmail(email);
-    else if (!sseUserId.empty()) target = repo::findUserBySseId(sseUserId);
+    if (!userId.empty()) target = repo::findUserById(userId, true);
+    else if (!email.empty()) target = repo::findUserByEmail(email, true);
+    else target = repo::findUserBySseId(sseUserId, true);
     if (!target) {
         oauthError(res, 404, "user_not_found", "用户不存在");
         return;
     }
 
-    std::string flag = http::input(req, "is_developer");
-    if (flag.empty()) flag = http::input(req, "developer");
-    bool isDeveloper = true;
-    if (!flag.empty()) {
-        std::string value = util::lower(util::trim(flag));
-        if (value == "true" || value == "1") isDeveloper = true;
-        else if (value == "false" || value == "0") isDeveloper = false;
-        else {
-            oauthError(res, 400, "invalid_request", "is_developer 仅接受 true / false");
-            return;
-        }
-    }
-
     if (!repo::updateUserDeveloper(target->id, isDeveloper)) {
         applog::error("[oauth] developer/update failed client=" + clientId +
                       " user=" + target->id);
-        oauthError(res, 500, "update_failed", "开发者权限更新失败");
+        throw StorageUnavailable();
+    }
+    auto refreshed = repo::findUserById(target->id, true);
+    if (!refreshed) {
+        oauthError(res, 404, "user_not_found", "用户不存在");
         return;
     }
-    auto refreshed = repo::findUserById(target->id);
-    if (refreshed) *target = *refreshed;
+    *target = *refreshed;
 
     std::map<std::string, JsonValue> obj;
     obj["ok"] = JsonValue(true);

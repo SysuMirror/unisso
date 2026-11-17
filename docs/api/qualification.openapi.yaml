@@ -1,0 +1,393 @@
+openapi: 3.1.0
+info:
+  title: UniSSO Join / Develop 资格接口
+  version: 1.0.0
+  description: |
+    对应修复提交 f2d9e9c，2026-11-17 本地隔离验证通过，部署后启用。
+    覆盖资格写入、内部登录、会话验证/注销和 OAuth userinfo。
+    POST 支持 HTTP Basic；也可在 JSON 请求体传 client_id/client_secret。
+    POST security 中的空对象表示请求体认证这个替代方式，服务端仍要求有效客户端凭据。
+    本文件采用 JSON 请求格式；实现还兼容表单输入。
+servers:
+  - url: '{baseUrl}'
+    description: 替换为管理员提供的实际联调环境地址
+    variables:
+      baseUrl:
+        default: http://127.0.0.1:8080
+tags:
+  - name: Join
+  - name: Develop
+paths:
+  /api/oauth/developer/update:
+    post:
+      operationId: updateDeveloperQualification
+      tags: [Join]
+      summary: 设置开发者资格
+      description: |
+        需要内部、approved、启用 M2M 的机密客户端及有效密钥，并在
+        UNISSO_DEVELOPER_WRITE_CLIENTS 名单中。按 user_id/email/sse_user_id
+        优先级选择第一个有值的定位字段，查不到不继续尝试其他字段。
+        显式设置目标值，可重复调用；返回写入后重新读取的当前值。
+        503 或超时可能发生在写入提交后，可恢复后重试相同目标值。
+      security:
+        - clientBasic: []
+        - {}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeveloperUpdateRequest'
+            examples:
+              grant:
+                value: {user_id: sso-user-example, is_developer: true}
+              revoke:
+                value: {user_id: sso-user-example, is_developer: false}
+              bodyAuthentication:
+                value: {client_id: join-example, client_secret: '<后端客户端密钥>', user_id: sso-user-example, is_developer: true}
+      responses:
+        '200':
+          description: 当前资格，含更新后重新读取的身份
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeveloperUpdateResponse'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/InvalidClient'
+        '403':
+          description: developer_update_forbidden，应用没有资格写入权限
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OAuthError'
+              example: {error: developer_update_forbidden}
+        '404':
+          description: user_not_found，目标用户不存在或确认读取时已被删除
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OAuthError'
+              example: {error: user_not_found, error_description: 用户不存在}
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /api/oauth/password/verify:
+    post:
+      operationId: verifyPassword
+      tags: [Develop]
+      summary: 验证用户密码并创建 SSO 会话
+      description: |
+        需要有效的机密客户端，通常配置为 internal + m2m_enabled；
+        历史 UNISSO_PASSWORD_VERIFY_CLIENTS 名单仍可赋予此内部接入能力。
+        按 IP 与邮箱组合计数，首次计数后 900 秒内超过 5 次返回 429，成功后清除计数。
+        Redis 无法保存会话时返回 503。
+      security:
+        - clientBasic: []
+        - {}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordRequest'
+            example: {email: user@example.invalid, password: '<用户输入的密码>'}
+      responses:
+        '200':
+          $ref: '#/components/responses/Session'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          description: invalid_client 或 invalid_credentials（用户不存在、密码不匹配或已停用）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OAuthError'
+              example: {error: invalid_credentials, error_description: 邮箱或密码错误}
+        '403':
+          $ref: '#/components/responses/M2mForbidden'
+        '429':
+          description: too_many_attempts，当前 IP 与邮箱组合超过尝试次数
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OAuthError'
+              example: {error: too_many_attempts, error_description: 尝试次数过多，请稍后再试}
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /api/oauth/session/verify:
+    post:
+      operationId: verifySession
+      tags: [Develop]
+      summary: 验证 SSO 会话，读取最新身份并续期
+      description: |
+        客户端权限同 password/verify。成功时重新读取用户 developer，并延长会话有效期。
+        无资格用户仍返回 200 + user.developer=false，业务访问由下游决定。
+      security:
+        - clientBasic: []
+        - {}
+      requestBody:
+        $ref: '#/components/requestBodies/Session'
+      responses:
+        '200':
+          $ref: '#/components/responses/Session'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          description: invalid_client 或 invalid_session（会话无效、过期、用户不存在或已停用）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OAuthError'
+              example: {error: invalid_session}
+        '403':
+          $ref: '#/components/responses/M2mForbidden'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /api/oauth/session/revoke:
+    post:
+      operationId: revokeSession
+      tags: [Develop]
+      summary: 删除指定 SSO 会话
+      description: |
+        客户端权限同 password/verify。会话不存在也返回成功；删除失败返回 503。
+        所有使用该会话的应用随后验证失败。其他 SSO 会话和 OAuth token 不受此操作影响。
+      security:
+        - clientBasic: []
+        - {}
+      requestBody:
+        $ref: '#/components/requestBodies/Session'
+      responses:
+        '200':
+          description: 会话已删除或原本不存在
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok: {const: true}
+              example: {ok: true}
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/InvalidClient'
+        '403':
+          $ref: '#/components/responses/M2mForbidden'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /api/oauth/userinfo:
+    get:
+      operationId: getUserinfo
+      tags: [Develop]
+      summary: 用 access token 读取最新身份和资格
+      description: |
+        使用既有 OAuth 流程取得的 access token，无需 M2M 客户端凭据。
+        每次请求检查签名、有效期、撤销记录及用户状态，并读取最新 developer。
+        其他资料按 token 已授予的 scope 返回。本文件不定义授权码和 token 换取流程。
+      security:
+        - accessToken: []
+      responses:
+        '200':
+          description: 身份字段直接位于根对象，没有 user 包装
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Userinfo'
+              example: {sub: sso-user-example, sso_sub: sso-user-example, internal: false, developer: true}
+        '401':
+          description: invalid_token，token 无效、过期、被撤销，或用户不存在/已停用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OAuthError'
+              example: {error: invalid_token}
+        '503':
+          $ref: '#/components/responses/Unavailable'
+components:
+  securitySchemes:
+    clientBasic:
+      type: http
+      scheme: basic
+      description: client_id 为用户名、client_secret 为密码；仅用于 POST 接口
+    accessToken:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    ClientCredentials:
+      type: object
+      description: 使用 Basic 时省略这两个字段；使用请求体认证时同时提供
+      properties:
+        client_id: {type: string, minLength: 1}
+        client_secret: {type: string, minLength: 1, writeOnly: true}
+      dependentRequired:
+        client_id: [client_secret]
+        client_secret: [client_id]
+    DeveloperFlag:
+      description: 推荐 JSON boolean；兼容数字 0/1 和去空白、不区分大小写的 true/false/0/1 字符串
+      oneOf:
+        - type: boolean
+        - type: integer
+          enum: [0, 1]
+        - type: string
+          pattern: '^\s*([Tt][Rr][Uu][Ee]|[Ff][Aa][Ll][Ss][Ee]|0|1)\s*$'
+    DeveloperUpdateRequest:
+      allOf:
+        - $ref: '#/components/schemas/ClientCredentials'
+        - type: object
+          properties:
+            user_id: {type: string, minLength: 1, description: UniSSO sub，推荐定位方式}
+            email: {type: string, minLength: 1, description: UniSSO 邮箱}
+            sse_user_id: {type: string, minLength: 1, description: 集市用户 ID，对应 sse_sub}
+            is_developer:
+              $ref: '#/components/schemas/DeveloperFlag'
+            developer:
+              $ref: '#/components/schemas/DeveloperFlag'
+          allOf:
+            - anyOf:
+                - required: [user_id]
+                - required: [email]
+                - required: [sse_user_id]
+            - anyOf:
+                - required: [is_developer]
+                - required: [developer]
+    PasswordRequest:
+      allOf:
+        - $ref: '#/components/schemas/ClientCredentials'
+        - type: object
+          required: [email, password]
+          properties:
+            email: {type: string, minLength: 1}
+            password: {type: string, minLength: 1, writeOnly: true}
+    SessionRequest:
+      allOf:
+        - $ref: '#/components/schemas/ClientCredentials'
+        - type: object
+          required: [session]
+          properties:
+            session: {type: string, minLength: 1, description: password/verify 返回的 sso_session}
+    M2mUser:
+      type: object
+      required: [sub, sso_sub, sse_sub, internal, developer, preferred_username, name, email, picture, student_id]
+      properties:
+        sub: {type: string, description: UniSSO 用户 ID}
+        sso_sub: {type: string, description: 与 sub 相同}
+        sse_sub: {type: [string, 'null'], description: 集市用户 ID，未绑定时为 null}
+        internal: {type: boolean}
+        developer: {type: boolean}
+        preferred_username: {type: string}
+        name: {type: string}
+        email: {type: string}
+        picture: {type: string}
+        student_id: {type: string}
+      example:
+        sub: sso-user-example
+        sso_sub: sso-user-example
+        sse_sub: null
+        internal: false
+        developer: true
+        preferred_username: example
+        name: ''
+        email: user@example.invalid
+        picture: ''
+        student_id: ''
+    DeveloperUpdateResponse:
+      type: object
+      required: [ok, developer, user]
+      properties:
+        ok: {const: true}
+        developer: {type: boolean, description: 与 user.developer 相同}
+        user:
+          $ref: '#/components/schemas/M2mUser'
+    SessionResponse:
+      type: object
+      required: [ok, sso_session, sso_cookie_name, sso_cookie_domain, sso_max_age, sso_expires_at, user]
+      properties:
+        ok: {const: true}
+        sso_session: {type: string, description: SSO 会话标识}
+        sso_cookie_name: {type: string, examples: [unisso_sid]}
+        sso_cookie_domain: {type: string, examples: [.ssemarket.cn]}
+        sso_max_age: {type: integer, description: 会话有效期秒数，默认 604800}
+        sso_expires_at: {type: integer, format: int64, description: Unix 秒时间戳}
+        user:
+          $ref: '#/components/schemas/M2mUser'
+    Userinfo:
+      type: object
+      required: [sub, sso_sub, internal, developer]
+      properties:
+        sub: {type: string}
+        sso_sub: {type: string, description: 与 sub 相同}
+        internal: {type: boolean}
+        developer: {type: boolean}
+        sse_sub: {type: string, description: 授予 sse_identity 且已绑定时返回}
+        preferred_username: {type: string, description: 授予 profile:username 且值非空时返回}
+        name: {type: string, description: 授予 profile:name 且值非空时返回}
+        picture: {type: string, description: 授予 profile:avatar 且值非空时返回}
+        student_id: {type: string, description: 授予 profile:student_id 且值非空时返回}
+        email: {type: string, description: 授予 email 时返回}
+        email_verified: {type: boolean, description: 授予 email 时返回}
+        roles:
+          type: array
+          description: 授予 roles 时返回，可包含 super_admin；开发者资格使用 developer
+          items: {type: string, enum: [super_admin]}
+    OAuthError:
+      type: object
+      required: [error]
+      properties:
+        error: {type: string}
+        error_description: {type: string}
+    UnavailableError:
+      type: object
+      required: [ok, error, message]
+      properties:
+        ok: {const: false}
+        error: {const: temporarily_unavailable}
+        message: {type: string}
+  requestBodies:
+    Session:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/SessionRequest'
+          example: {session: sess_example}
+  responses:
+    Session:
+      description: 会话信息及最新身份；此接口返回元信息，由下游后端保存会话或设置 Cookie
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/SessionResponse'
+    InvalidRequest:
+      description: invalid_request，必填参数缺失或资格值非法
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/OAuthError'
+          example: {error: invalid_request}
+    InvalidClient:
+      description: invalid_client，客户端不存在、停用、密钥错误，或不是机密客户端
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/OAuthError'
+          example: {error: invalid_client}
+    M2mForbidden:
+      description: password_verify_forbidden，客户端没有内部 M2M 接入权限
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/OAuthError'
+          example: {error: password_verify_forbidden}
+    Unavailable:
+      description: temporarily_unavailable，依赖失败；写操作可能已提交，资格更新可重试相同目标值
+      headers:
+        Retry-After:
+          description: 建议等待秒数，当前固定为 3
+          schema: {type: string, const: '3'}
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/UnavailableError'
+          example: {ok: false, error: temporarily_unavailable, message: 身份服务暂时不可用，请稍后重试}

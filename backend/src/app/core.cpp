@@ -600,9 +600,12 @@ bool Db::init() {
     }
 }
 
-std::vector<std::map<std::string, std::string>> Db::query(const std::string& sql) {
-    if (!g_db) return {};
-    return g_db->query(sql);
+std::vector<std::map<std::string, std::string>> Db::query(const std::string& sql, bool checked) {
+    if (!g_db) {
+        if (checked) throw StorageUnavailable();
+        return {};
+    }
+    return g_db->query(sql, checked);
 }
 
 int Db::exec(const std::string& sql) {
@@ -656,8 +659,12 @@ std::string Cache::key(const std::string& name) {
     return AppConfig::get().redisPrefix + ":" + name;
 }
 
-std::string Cache::get(const std::string& name) {
-    return g_redis ? g_redis->get(key(name)) : "";
+std::string Cache::get(const std::string& name, bool checked) {
+    if (!g_redis) {
+        if (checked) throw StorageUnavailable();
+        return "";
+    }
+    return g_redis->get(key(name), checked);
 }
 
 bool Cache::set(const std::string& name, const std::string& value, int ttl) {
@@ -680,7 +687,7 @@ std::string Cache::getdel(const std::string& name) {
 long long Cache::incr(const std::string& name, int ttl) {
     if (!g_redis) return -1;
     long long value = g_redis->incr(key(name));
-    if (value == 1 && ttl > 0) g_redis->expire(key(name), ttl);
+    if (value == 1 && ttl > 0 && !g_redis->expire(key(name), ttl)) return -1;
     return value;
 }
 
@@ -1255,7 +1262,9 @@ std::string createSession(const std::string& userId, const std::string& username
     data["last_seen_at"] = jsonx::num(now);
     data["expires_at"] = jsonx::num(now + static_cast<long long>(hours) * 3600);
     if (!deviceHash.empty()) data["device_hash"] = JsonValue(deviceHash);
-    Cache::setJson("session:" + id, jsonx::dump(data), hours * 3600);
+    if (!Cache::setJson("session:" + id, jsonx::dump(data), hours * 3600)) {
+        throw StorageUnavailable();
+    }
     return id;
 }
 
