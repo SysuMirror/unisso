@@ -11,9 +11,12 @@
 
 ## Join / Develop 接入
 
-- [接入指南](docs/integration/join-develop.md)：Join 写资格、Develop 读取与判断、登录与退出、错误和重试。
-- [OpenAPI 3.1](docs/api/qualification.openapi.yaml)：本次链路的 5 个接口。
-- [验证记录](backend/tests/qualification/RESULTS.md)：60 项本地隔离检查通过；实际部署状态以发布记录为准。
+- [接入 handoff](docs/handoff.md)：分工、环境准备、接口选择和联调顺序。
+- [设置开发者资格](docs/api/developer-update.md)：Join 授予、撤销资格。
+- [内部登录](docs/api/password-verify.md)、[会话验证](docs/api/session-verify.md)、[会话注销](docs/api/session-revoke.md)：内部应用使用 SSO 会话。
+- [OAuth userinfo](docs/api/userinfo.md)：已有 OAuth 登录的应用读取当前身份与资格。
+- [OpenAPI 3.1](docs/api/qualification.openapi.yaml)：五个接口的结构化定义。
+- [验证记录](backend/tests/qualification/RESULTS.md)：本地隔离检查范围与复跑方式。
 
 ## 公网地址
 
@@ -64,6 +67,13 @@ cd .. && ./deploy.sh
 系统依赖（容器重建后由 `deploy.sh` 自动安装）：
 `cmake libssl-dev default-libmysqlclient-dev libhiredis-dev zlib1g-dev
 libcurl4-openssl-dev libcrypt-dev libcpp-httplib-dev`。
+
+Pod 使用 `devdebs/` 恢复构建依赖，其中还需包含 CMake 的运行依赖
+`libarchive13t64 librhash0 libjsoncpp25 libxml2 libicu74` 和 pkg-config 的实现
+`pkgconf pkgconf-bin libpkgconf3`。部署脚本会检查 CMake 能否运行及编译器能否找到头文件；
+后端在 `backend/build-next/` 编译成功且动态库可解析后，才替换运行文件。
+资格写入名单可由平台环境变量配置，也可使用持久化的
+`backend/developer-write-clients.local`，详见接入 handoff。
 
 ## 功能边界
 

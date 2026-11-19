@@ -1,4 +1,6 @@
 backend/build/
+backend/build-next/
+backend/developer-write-clients.local
 backend/web/
 backend/secrets/
 backend/data/
@@ -15,3 +17,12 @@ backups/
 # Local runtime artifacts and one-off deploy backups
 logs/
 deploy.sh.bak*
+
+# Local workspace credentials and development handover notes
+/.env
+/LOCAL_DEVELOPMENT.md
+
+# Local learning notes, development plans and research
+/docs/learning/
+/docs/plans/
+/docs/research/
