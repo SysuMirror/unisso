@@ -117,7 +117,7 @@ AuthorizeRequest readAuthorize(const Request& req, bool fromQuery) {
 }
 
 bool validateAuthorize(const Request& req, bool fromQuery,
-                       const User& user, AuthorizeRequest& ar,
+                       AuthorizeRequest& ar,
                        Application& app, std::vector<std::string>& candidate,
                        std::string& errorCode, std::string& message) {
     ar = readAuthorize(req, fromQuery);
@@ -126,7 +126,7 @@ bool validateAuthorize(const Request& req, bool fromQuery,
         message = "缺少 client_id 或 redirect_uri";
         return false;
     }
-    auto found = repo::findApplicationByClientId(ar.clientId);
+    auto found = repo::findApplicationByClientId(ar.clientId, true);
     if (!found || !found->isActive) {
         errorCode = "invalid_client";
         message = "应用不存在或已停用";
@@ -193,21 +193,60 @@ std::pair<std::string, std::string> basicCredentials(const Request& req) {
     return {util::urlDecode(decoded.substr(0, colon)), util::urlDecode(decoded.substr(colon + 1))};
 }
 
+std::string ssoCookieName() {
+    return util::env("UNISSO_SSO_COOKIE_NAME", "unisso_sid");
+}
+
+std::optional<User> sharedAuthorizeUser(const Application& app, const std::string& session) {
+    if (app.kind != "internal" || !app.isConfidential || !app.m2mEnabled) {
+        return std::nullopt;
+    }
+    // The shared session is valid for this OAuth flow only; do not promote it
+    // to the host-only session used by account and administration pages.
+    std::map<std::string, JsonValue> data;
+    if (!jsonx::parseObject(Cache::get("session:" + session, true), data)) return std::nullopt;
+    const auto expiry = data.find("expires_at");
+    if (expiry == data.end() || expiry->second.getType() != JsonValue::NUMBER ||
+        expiry->second.asNumber() <= util::nowEpoch()) return std::nullopt;
+    const auto userId = jsonx::getString(data, "user_id");
+    if (userId.empty()) return std::nullopt;
+    auto user = repo::findUserById(userId, true);
+    if (!user || !user->isActive) return std::nullopt;
+    return user;
+}
+
+std::optional<User> loadAuthorize(const Request& req, Response& res, bool fromQuery,
+                                  AuthorizeRequest& ar, Application& app,
+                                  std::vector<std::string>& candidate, bool& usingSharedSession) {
+    auto user = authx::currentUser(req);
+    const auto sharedSession = user ? std::string() : http::cookie(req, ssoCookieName());
+    if (!user && sharedSession.empty()) {
+        http::error(res, 401, "authentication_required", "请先登录");
+        return std::nullopt;
+    }
+    std::string errorCode, message;
+    if (!validateAuthorize(req, fromQuery, ar, app, candidate, errorCode, message)) {
+        http::error(res, 400, errorCode, message);
+        return std::nullopt;
+    }
+    usingSharedSession = !user;
+    if (usingSharedSession) user = sharedAuthorizeUser(app, sharedSession);
+    if (!user) http::error(res, 401, "authentication_required", "请先登录");
+    return user;
+}
+
 }  // namespace
 
 namespace handlers {
 
 void oauthContext(const Request& req, Response& res) {
-    User user;
-    if (!authx::requireUser(req, res, user)) return;
     AuthorizeRequest ar;
     Application app;
     std::vector<std::string> candidate;
-    std::string errorCode, message;
-    if (!validateAuthorize(req, true, user, ar, app, candidate, errorCode, message)) {
-        http::error(res, 400, errorCode, message);
-        return;
-    }
+    bool usingSharedSession = false;
+    auto account = loadAuthorize(req, res, true, ar, app, candidate, usingSharedSession);
+    if (!account) return;
+    const User& user = *account;
 
     auto accountJson = [&](const User& account) {
         std::map<std::string, JsonValue> item;
@@ -255,16 +294,13 @@ void oauthContext(const Request& req, Response& res) {
 }
 
 void oauthAuthorize(const Request& req, Response& res) {
-    User user;
-    if (!authx::requireUser(req, res, user)) return;
     AuthorizeRequest ar;
     Application app;
     std::vector<std::string> candidate;
-    std::string errorCode, message;
-    if (!validateAuthorize(req, false, user, ar, app, candidate, errorCode, message)) {
-        http::error(res, 400, errorCode, message);
-        return;
-    }
+    bool usingSharedSession = false;
+    auto account = loadAuthorize(req, res, false, ar, app, candidate, usingSharedSession);
+    if (!account) return;
+    const User& user = *account;
 
     std::string approvedValue = http::input(req, "approved");
     bool approved = approvedValue.empty() || approvedValue == "true" || approvedValue == "1";
@@ -294,7 +330,7 @@ void oauthAuthorize(const Request& req, Response& res) {
     }
 
     std::string asUserId = util::trim(http::input(req, "as_user_id"));
-    if (!asUserId.empty() && asUserId != user.id) {
+    if ((usingSharedSession || !asUserId.empty()) && asUserId != user.id) {
         http::error(res, 403, "forbidden", "不能以该账号授权");
         return;
     }
@@ -610,10 +646,6 @@ int ssoSessionHours() {
 
 std::string ssoCookieDomain() {
     return util::env("UNISSO_SSO_COOKIE_DOMAIN", ".ssemarket.cn");
-}
-
-std::string ssoCookieName() {
-    return util::env("UNISSO_SSO_COOKIE_NAME", "unisso_sid");
 }
 
 std::map<std::string, JsonValue> userClaimsJson(const User& user) {

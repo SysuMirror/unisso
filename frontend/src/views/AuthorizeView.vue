@@ -156,7 +156,7 @@ async function load() {
     selectedAccountId.value = preferred?.id || ''
   } catch (e) {
     if (e.status === 401) {
-      router.push({ path: '/login', query: { next: route.fullPath } })
+      router.replace({ path: '/login', query: { next: route.fullPath } })
       return
     }
     error.value = e.message
@@ -190,6 +190,10 @@ async function decide(approved) {
     })
     if (data.redirect_url) window.location.assign(data.redirect_url)
   } catch (e) {
+    if (e.status === 401) {
+      router.replace({ path: '/login', query: { next: route.fullPath } })
+      return
+    }
     submitError.value = e.message
     submitting.value = false
   }

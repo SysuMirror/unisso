@@ -31,7 +31,8 @@ const routes = [
   { path: '/qr/:id', name: 'qr-confirm', component: QrConfirmView, meta: { requiresAuth: true } },
   { path: '/profile', name: 'profile', component: ProfileView, meta: { requiresAuth: true } },
   { path: '/consents', redirect: '/profile' },
-  { path: '/authorize', name: 'authorize', component: AuthorizeView, meta: { requiresAuth: true } },
+  // The OAuth context endpoint also recognizes eligible shared SSO sessions.
+  { path: '/authorize', name: 'authorize', component: AuthorizeView },
   { path: '/privacy', name: 'privacy', component: PrivacyView },
   // Public developer portal — intentionally no meta: reachable logged out.
   { path: '/docs', name: 'docs', component: DocsView },

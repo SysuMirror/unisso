@@ -22,6 +22,7 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+import urllib.parse
 
 
 def port():
@@ -230,6 +231,52 @@ def main():
             if data['user'].get('developer') is not True:
                 return 403, {'error':'developer_required'}
             return 200, {'ok':True}
+        if not args.baseline:
+            # Simulate the marketplace password exchange setting the shared
+            # Cookie, then the browser arriving at UniSSO from Join's /start.
+            callback = 'https://join.example.invalid/api/auth/sso/callback'
+            sql("USE qualification; UPDATE applications SET redirect_uris='"
+                + json.dumps([callback]) + "', allowed_scopes='[\"openid\"]'")
+            authorize = {'client_id': 'join-test', 'redirect_uri': callback,
+                'response_type': 'code', 'scope': 'openid', 'state': 'join-state',
+                'code_challenge': 'a' * 43, 'code_challenge_method': 'S256'}
+            context = lambda params, headers=None: request('/api/oauth/authorize/context?'
+                + urllib.parse.urlencode(params), headers=headers)
+            shared_cookie = {'Cookie': 'unisso_sid=' + session}
+            expect('Join authorization without a session', context(authorize), 401, 'authentication_required')
+            loaded = expect('Join authorization reuses marketplace session', context(authorize, shared_cookie))
+            assert loaded['current_user_id'] == 'test-user' and loaded['auto_approved'] is False
+            for client in ['external-test', 'no-m2m-test', 'public-test']:
+                expect('Shared login denied for ' + client,
+                    context({**authorize, 'client_id': client}, shared_cookie), 401, 'authentication_required')
+            expect('Shared login keeps redirect validation',
+                context({**authorize, 'redirect_uri': 'https://unexpected.example.invalid/'}, shared_cookie),
+                400, 'invalid_redirect_uri')
+            expect('Host-only browser session still authorizes external apps',
+                context({**authorize, 'client_id': 'external-test'}, {'Cookie': 'unisso_session=' + session}))
+            expect('Shared login does not sign in to UniSSO account pages', request('/api/auth/me',
+                headers=shared_cookie), 401, 'authentication_required')
+            csrf_headers = {**shared_cookie, 'Cookie': shared_cookie['Cookie'] + '; unisso_csrf_context=' + 'b' * 43}
+            csrf = expect('Fetch authorization CSRF token', request('/api/csrf-token', headers=csrf_headers))['csrf_token']
+            approved = {**authorize, 'approved': True, 'as_user_id': 'test-user'}
+            submit = lambda body, headers: request('/api/oauth/authorize', body, headers)
+            expect('Shared authorization requires CSRF', submit(approved, csrf_headers), 403, 'csrf_validation_failed')
+            csrf_headers['X-CSRF-Token'] = csrf
+            expect('Shared authorization rejects a changed account',
+                submit({**approved, 'as_user_id': 'other-user'}, csrf_headers), 403, 'forbidden')
+            authorized = expect('Join receives authorization code after consent', submit(approved, csrf_headers))
+            target = urllib.parse.urlsplit(authorized['redirect_url'])
+            params = urllib.parse.parse_qs(target.query)
+            assert target._replace(query='').geturl() == callback and params.get('code') and params['state'] == ['join-state']
+            redis('SETEX', 'qualification:session:sess_expired', '600',
+                json.dumps({'user_id': 'test-user', 'expires_at': 1}))
+            expect('Expired shared session cannot authorize',
+                context(authorize, {'Cookie': 'unisso_sid=sess_expired'}), 401, 'authentication_required')
+            sql("USE qualification; UPDATE users SET is_active=0 WHERE id='test-user'")
+            expect('Disabled account cannot authorize with shared session',
+                context(authorize, shared_cookie), 401, 'authentication_required')
+            sql("USE qualification; UPDATE users SET is_active=1 WHERE id='test-user'")
+
         expect('Develop reads unqualified identity', read(), developer=False)
         expect('simulated Develop denies protected business',develop_access(),403,'developer_required')
         expect('userinfo reads initial qualification',userinfo(),developer=False)
