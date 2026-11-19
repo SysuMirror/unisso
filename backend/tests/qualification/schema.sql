@@ -29,7 +29,18 @@ CREATE TABLE applications (
   is_confidential TINYINT DEFAULT 1,
   m2m_enabled TINYINT DEFAULT 1,
   kind VARCHAR(16) DEFAULT 'internal',
-  status VARCHAR(16) DEFAULT 'approved'
+  status VARCHAR(16) DEFAULT 'approved',
+  redirect_uris TEXT,
+  allowed_scopes TEXT
+);
+CREATE TABLE user_consents (
+  id VARCHAR(36) PRIMARY KEY,
+  user_id VARCHAR(36),
+  application_id VARCHAR(36),
+  scopes TEXT,
+  is_active TINYINT DEFAULT 1,
+  granted_at DATETIME,
+  revoked_at DATETIME
 );
 CREATE TABLE user_identities (
   id VARCHAR(36) PRIMARY KEY,
