@@ -660,6 +660,8 @@ std::map<std::string, JsonValue> userClaimsJson(const User& user) {
     u["email"] = JsonValue(user.email);
     u["picture"] = JsonValue(user.avatar);
     u["student_id"] = JsonValue(user.studentId);
+    u["is_admin"] = JsonValue(user.isAdmin);
+    u["is_super_admin"] = JsonValue(user.isSuperAdmin);
     return u;
 }
 
