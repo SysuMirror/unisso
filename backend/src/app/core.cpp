@@ -911,8 +911,13 @@ JsonValue userClaims(const User& user, const std::vector<std::string>& granted) 
         if (user.isSuperAdmin) roles.push_back("super_admin");
         claims["roles"] = JsonValue(roles);
     }
-    claims["internal"] = JsonValue(user.isInternal);
-    claims["developer"] = JsonValue(user.isDeveloper);
+    // Administrators are staff: they implicitly hold the in-house and developer
+    // identities so that a platform granted to internal/developer users never
+    // locks an admin out. Derived at claim time (not persisted) so demoting an
+    // admin restores exactly the flags they actually hold.
+    const bool staff = user.isAdmin || user.isSuperAdmin;
+    claims["internal"] = JsonValue(user.isInternal || staff);
+    claims["developer"] = JsonValue(user.isDeveloper || staff);
     return JsonValue(claims);
 }
 

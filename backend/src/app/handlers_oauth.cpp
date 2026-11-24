@@ -653,8 +653,11 @@ std::map<std::string, JsonValue> userClaimsJson(const User& user) {
     u["sub"] = JsonValue(user.id);
     u["sso_sub"] = JsonValue(user.id);
     u["sse_sub"] = user.sseUserId.empty() ? JsonValue() : JsonValue(user.sseUserId);
-    u["internal"] = JsonValue(user.isInternal);
-    u["developer"] = JsonValue(user.isDeveloper);
+    // 管理员/超管自动附带院内与开发者身份：管理员不应被自己辖区里的小平台挡在门外。
+    // 只在此处派生，不落库；降权后即恢复真实标记。
+    const bool staff = user.isAdmin || user.isSuperAdmin;
+    u["internal"] = JsonValue(user.isInternal || staff);
+    u["developer"] = JsonValue(user.isDeveloper || staff);
     u["preferred_username"] = JsonValue(user.username);
     u["name"] = JsonValue(user.fullName);
     u["email"] = JsonValue(user.email);
