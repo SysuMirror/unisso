@@ -918,6 +918,9 @@ JsonValue userClaims(const User& user, const std::vector<std::string>& granted) 
     const bool staff = user.isAdmin || user.isSuperAdmin;
     claims["internal"] = JsonValue(user.isInternal || staff);
     claims["developer"] = JsonValue(user.isDeveloper || staff);
+    // 下游平台（join 等）据此自动识别管理员，不必再逐人维护本地白名单。
+    claims["is_admin"] = JsonValue(user.isAdmin);
+    claims["is_super_admin"] = JsonValue(user.isSuperAdmin);
     return JsonValue(claims);
 }
 
