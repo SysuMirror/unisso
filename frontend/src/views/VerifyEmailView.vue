@@ -25,7 +25,7 @@
         {{ resending ? '发送中…' : '重新发送' }}
       </button>
       <span class="auth-sep">·</span>
-      <RouterLink to="/login">返回登录</RouterLink>
+      <RouterLink :to="loginLink">返回登录</RouterLink>
     </template>
   </AuthShell>
 </template>
@@ -41,6 +41,9 @@ import { store } from '../store'
 const route = useRoute()
 const router = useRouter()
 const redirectUri = redirectFromQuery(route.query)
+const loginLink = redirectUri
+  ? { path: '/login', query: { redirect_uri: redirectUri } }
+  : '/login'
 const email = ref(typeof route.query.email === 'string' ? route.query.email : '')
 const code = ref('')
 const loading = ref(false)
