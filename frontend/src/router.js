@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { goToRedirect, redirectFromQuery } from './redirect'
 import { store, loadMe } from './store'
 
 // Route-level code splitting: the phone only ever needs the QR-confirm chunk,
@@ -62,6 +63,12 @@ router.beforeEach(async (to) => {
     return { path: '/profile' }
   }
   if ((to.path === '/login' || to.path === '/register') && store.user) {
+    // 已登录时不再把用户丢到 /profile：第一方站点带了回跳地址就直接回去。
+    const redirect = redirectFromQuery(to.query)
+    if (redirect) {
+      goToRedirect(redirect)
+      return false
+    }
     return { path: '/profile' }
   }
   return true

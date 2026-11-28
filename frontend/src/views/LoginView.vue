@@ -103,10 +103,13 @@ import { useRoute, useRouter } from 'vue-router'
 import QRCode from 'qrcode'
 import AuthShell from '../components/AuthShell.vue'
 import { api, resetCsrf } from '../api'
+import { goToRedirect, redirectFromQuery } from '../redirect'
 import { loadMe } from '../store'
 
 const route = useRoute()
 const router = useRouter()
+// 集市等第一方站点带来的跨域回跳地址（注册页的“已有账号”会把同一个地址转过来）。
+const externalRedirect = redirectFromQuery(route.query)
 const email = ref('')
 const password = ref('')
 const loading = ref(false)
@@ -173,6 +176,12 @@ function safeNext(value) {
   return typeof value === 'string' && value.startsWith('/') && !value.startsWith('//') ? value : '/'
 }
 
+function finishLogin(next) {
+  // 第一方站点带来的回跳地址优先；否则保持原来的站内 next 行为。
+  if (!goToRedirect(externalRedirect))
+    router.push(safeNext(next))
+}
+
 async function submit() {
   error.value = ''
   loading.value = true
@@ -184,7 +193,7 @@ async function submit() {
     })
     resetCsrf()
     await loadMe(true)
-    router.push(safeNext(data?.next || next))
+    finishLogin(data?.next || next)
   } catch (e) {
     error.value = e.message
   } finally {
@@ -208,7 +217,7 @@ async function poll() {
         stopPolling()
         resetCsrf()
         await loadMe(true)
-        router.push(safeNext(data?.next))
+        finishLogin(data?.next)
       } else if (data.status === 'expired') {
         stopPolling()
         stopCountdown()
@@ -222,7 +231,7 @@ async function poll() {
       stopPolling()
       resetCsrf()
       await loadMe(true)
-      router.push(safeNext(data?.next))
+      finishLogin(data?.next)
     } else if (data.status === 'scanned') {
       qrScanned.value = true
     } else if (data.status === 'expired') {
