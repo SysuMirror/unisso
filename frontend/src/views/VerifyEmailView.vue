@@ -35,10 +35,12 @@ import { ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AuthShell from '../components/AuthShell.vue'
 import { api, resetCsrf } from '../api'
+import { goToRedirect, redirectFromQuery } from '../redirect'
 import { store } from '../store'
 
 const route = useRoute()
 const router = useRouter()
+const redirectUri = redirectFromQuery(route.query)
 const email = ref(typeof route.query.email === 'string' ? route.query.email : '')
 const code = ref('')
 const loading = ref(false)
@@ -58,7 +60,8 @@ async function verify() {
     resetCsrf()
     store.user = data.user
     store.loaded = true
-    router.push('/')
+    if (!goToRedirect(redirectUri))
+      router.push('/')
   } catch (e) {
     error.value = e.message
   } finally {

@@ -39,7 +39,7 @@
     </form>
 
     <template #note>
-      已有账号？<RouterLink to="/login">登录</RouterLink>
+      已有账号？<RouterLink :to="loginLink">登录</RouterLink>
     </template>
   </AuthShell>
 
@@ -70,13 +70,20 @@
 
 <script setup>
 import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import AuthShell from '../components/AuthShell.vue'
 import Modal from '../components/Modal.vue'
 import { api, resetCsrf } from '../api'
+import { goToRedirect, redirectFromQuery } from '../redirect'
 import { store } from '../store'
 
+const route = useRoute()
 const router = useRouter()
+// 集市等第一方站点跳转过来时携带的回跳地址；为空则保持原来的站内行为。
+const redirectUri = redirectFromQuery(route.query)
+const loginLink = redirectUri
+  ? { path: '/login', query: { redirect_uri: redirectUri } }
+  : '/login'
 const email = ref('')
 const password = ref('')
 const username = ref('')
@@ -109,7 +116,11 @@ async function submit() {
       sseModalOpen.value = true
       return
     }
-    router.push({ path: '/verify-email', query: { email: email.value } })
+    // 普通邮箱注册还要去 /verify-email 完成验证，回跳地址一并带过去。
+    const query = { email: email.value }
+    if (redirectUri)
+      query.redirect_uri = redirectUri
+    router.push({ path: '/verify-email', query })
   } catch (e) {
     error.value = e.message
   } finally {
@@ -135,7 +146,9 @@ async function finishInvite() {
     store.user = data.user
     store.loaded = true
     sseModalOpen.value = false
-    router.push('/')
+    // 邀请码一步到位注册：直接回到发起注册的集市页面。
+    if (!goToRedirect(redirectUri))
+      router.push('/')
   } catch (e) {
     modalError.value = e.message
   } finally {
